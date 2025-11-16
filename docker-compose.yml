@@ -1,0 +1,145 @@
+services:
+  # 后端API服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: image-trace-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///app.db
+      - REDIS_URL=redis://redis:6379/1
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_SECURE=false
+    volumes:
+      - ./backend/app.db:/app/app.db
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      - redis
+      - minio
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 前端应用
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: image-trace-frontend
+    ports:
+      - "8080:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+
+  # Redis特征缓存服务
+  redis:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Redis管理界面
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: image-trace-redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:redis123
+    depends_on:
+      - redis
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+
+  # MinIO对象存储服务 (使用稳定版本以支持完整功能)
+  # 学习经验: 选择合适版本的MinIO以确保兼容性
+  # 注意: 当前版本使用AGPLv3许可证，商用请购买授权
+  minio:
+    image: minio/minio:RELEASE.2022-05-26T05-48-41Z
+    container_name: image-trace-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+    volumes:
+      - minio_data:/data
+      - ./minio/config.json:/root/.minio/config.json
+    command: server /data --console-address ":9001"
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO客户端（用于创建存储桶）- 暂时禁用
+  # minio-client:
+  #   image: minio/mc:latest
+  #   container_name: image-trace-minio-client
+  #   entrypoint: >
+  #     /bin/sh -c "
+  #     /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin123 &&
+  #     /usr/bin/mc mb myminio/image-trace-uploads ||
+  #     echo 'Bucket image-trace-uploads already exists' &&
+  #     /usr/bin/mc mb myminio/image-trace-extracted ||
+  #     echo 'Bucket image-trace-extracted already exists' &&
+  #     /usr/bin/mc mb myminio/image-trace-documents ||
+  #     echo 'Bucket image-trace-documents already exists' &&
+  #     /usr/bin/mc anonymous set public myminio/image-trace-uploads &&
+  #     /usr/bin/mc anonymous set public myminio/image-trace-extracted &&
+  #     /usr/bin/mc anonymous set public myminio/image-trace-documents &&
+  #     echo 'MinIO setup complete'
+  #     "
+  #   depends_on:
+  #     - minio
+  #   networks:
+  #     - image-trace-network
+  #   restart: "no"
+
+volumes:
+  # Redis数据
+  redis_data:
+    driver: local
+
+  # MinIO数据
+  minio_data:
+    driver: local
+
+networks:
+  image-trace-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

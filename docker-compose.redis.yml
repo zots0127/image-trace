@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-master
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_master_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=redis123
+    networks:
+      - redis-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis-slave-1:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-slave-1
+    ports:
+      - "6380:6379"
+    command: redis-server --slaveof redis-master 6379 --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_slave1_data:/data
+    environment:
+      - REDIS_PASSWORD=redis123
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis-slave-2:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-slave-2
+    ports:
+      - "6381:6379"
+    command: redis-server --slaveof redis-master 6379 --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_slave2_data:/data
+    environment:
+      - REDIS_PASSWORD=redis123
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis-sentinel:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-sentinel
+    ports:
+      - "26379:26379"
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - redis-master
+    networks:
+      - redis-network
+    restart: unless-stopped
+
+  # Redis Cluster (可选，用于更大规模)
+  redis-cluster-node-1:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-cluster-1
+    ports:
+      - "7001:6379"
+      - "17001:16379"
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_cluster1_data:/data
+    networks:
+      - redis-cluster-network
+    restart: unless-stopped
+    profiles:
+      - cluster
+
+  redis-cluster-node-2:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-cluster-2
+    ports:
+      - "7002:6379"
+      - "17002:16379"
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_cluster2_data:/data
+    networks:
+      - redis-cluster-network
+    restart: unless-stopped
+    profiles:
+      - cluster
+
+  redis-cluster-node-3:
+    image: redis:7.2-alpine
+    container_name: image-trace-redis-cluster-3
+    ports:
+      - "7003:6379"
+      - "17003:16379"
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_cluster3_data:/data
+    networks:
+      - redis-cluster-network
+    restart: unless-stopped
+    profiles:
+      - cluster
+
+  # Redis Commander (管理界面)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: image-trace-redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis-master:6379:0:redis123,slave1:redis-slave-1:6379:0:redis123,slave2:redis-slave-2:6379:0:redis123
+    depends_on:
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
+    networks:
+      - redis-network
+    restart: unless-stopped
+
+volumes:
+  redis_master_data:
+    driver: local
+  redis_slave1_data:
+    driver: local
+  redis_slave2_data:
+    driver: local
+  redis_cluster1_data:
+    driver: local
+  redis_cluster2_data:
+    driver: local
+  redis_cluster3_data:
+    driver: local
+
+networks:
+  redis-network:
+    driver: bridge
+  redis-cluster-network:
+    driver: bridge
