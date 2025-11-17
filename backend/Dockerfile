@@ -9,24 +9,35 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libpq-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    libglib2.0-0 \
-    libgtk-3-0 \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# 配置中科大镜像源
+RUN sed -i 's|http://deb.debian.org|http://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|http://security.debian.org|http://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources
+
+# 安装系统依赖 - 分步骤安装以减少内存使用
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc g++ libpq-dev curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx:arm64 libgl1-mesa-dev || \
+    apt-get install -y --no-install-recommends \
+    libgl1-mesa-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libgtk-3-0 libavcodec-dev libavformat-dev libswscale-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 配置pip中科大镜像源
+RUN pip config set global.index-url https://pypi.mirrors.ustc.edu.cn/simple
 
 # 复制requirements文件并安装Python依赖
 COPY requirements.txt .

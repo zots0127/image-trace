@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ZoomIn, ZoomOut, RotateCw, Download } from "lucide-react";
 
@@ -26,6 +25,11 @@ interface Region {
   score: number;
   match_count: number;
   inlier_count: number;
+  total_source_features?: number;
+  total_target_features?: number;
+  source_document_filename?: string;
+  target_document_filename?: string;
+  is_cross_document?: boolean;
   quad_in_target: number[][];
   bbox_in_target: number[];
   feature_matches?: FeatureMatches;
@@ -42,38 +46,91 @@ export function FeatureMatchingVisualization({
   imageUrls,
   imageFilenames
 }: FeatureMatchingVisualizationProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
+  const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
+  const [scales, setScales] = useState<number[]>([]);
+  const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
+  const [isDragging, setIsDragging] = useState<{ index: number; active: boolean } | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [showOnlyInliers, setShowOnlyInliers] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 筛选出有特征点匹配数据的区域
-  const regionsWithMatches = regions.filter(region =>
-    region.feature_matches &&
-    region.feature_matches.source_keypoints.length > 0
-  );
+  // 筛选出有特征点匹配数据的区域，并按优先级排序
+  // 优先级：1. 跨文档匹配（不同文件） 2. 相似度 3. 匹配质量
+  const regionsWithMatches = regions
+    .filter(region =>
+      region.feature_matches &&
+      region.feature_matches.source_keypoints.length > 0
+    )
+    .sort((a, b) => {
+      // 优先显示跨文档匹配（不同文件的匹配）
+      const aIsCrossDoc = a.is_cross_document === true;
+      const bIsCrossDoc = b.is_cross_document === true;
+      
+      if (aIsCrossDoc && !bIsCrossDoc) return -1;
+      if (!aIsCrossDoc && bIsCrossDoc) return 1;
+      
+      // 计算匹配点比例
+      const aTotalFeatures = Math.max(
+        a.total_source_features || 0,
+        a.total_target_features || 0,
+        a.feature_matches?.source_keypoints.length || 0
+      );
+      const bTotalFeatures = Math.max(
+        b.total_source_features || 0,
+        b.total_target_features || 0,
+        b.feature_matches?.source_keypoints.length || 0
+      );
+      
+      const aMatchRatio = aTotalFeatures > 0 ? a.match_count / aTotalFeatures : 0;
+      const bMatchRatio = bTotalFeatures > 0 ? b.match_count / bTotalFeatures : 0;
+      
+      const aIsLowRatio = aMatchRatio < 0.15 && aTotalFeatures > 200 && a.match_count < 50;
+      const bIsLowRatio = bMatchRatio < 0.15 && bTotalFeatures > 200 && b.match_count < 50;
+      
+      if (aIsLowRatio && !bIsLowRatio) return 1;
+      if (!aIsLowRatio && bIsLowRatio) return -1;
+      
+      if (aIsLowRatio && bIsLowRatio) {
+        if (Math.abs(a.score - b.score) < 0.01) {
+          return b.match_count - a.match_count;
+        }
+        return b.score - a.score;
+      }
+      
+      return b.score - a.score;
+    });
+
+  // 获取前5个匹配
+  const top5Regions = regionsWithMatches.slice(0, 5);
+
+  // 初始化scales和offsets
+  useEffect(() => {
+    if (scales.length !== top5Regions.length) {
+      setScales(new Array(top5Regions.length).fill(1));
+      setOffsets(new Array(top5Regions.length).fill({ x: 0, y: 0 }));
+    }
+  }, [top5Regions.length]);
 
   useEffect(() => {
-    if (selectedRegion && canvasRef.current) {
+    if (top5Regions.length > 0) {
       setIsLoading(true);
-      drawFeatureMatches()
+      Promise.all(top5Regions.map((_, index) => drawFeatureMatchesForRegion(index)))
         .catch(console.error)
         .finally(() => setIsLoading(false));
     }
-  }, [selectedRegion, scale, offset, showOnlyInliers]);
+  }, [top5Regions, scales, offsets, showOnlyInliers, imageUrls]);
 
-  const drawFeatureMatches = async () => {
-    if (!canvasRef.current || !selectedRegion?.feature_matches) return;
+  const drawFeatureMatchesForRegion = async (index: number) => {
+    const region = top5Regions[index];
+    const canvas = canvasRefs.current[index];
+    if (!canvas || !region?.feature_matches) return;
 
-    const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const { feature_matches } = selectedRegion;
+    const { feature_matches } = region;
+    const scale = scales[index] || 1;
+    const offset = offsets[index] || { x: 0, y: 0 };
     const { source_keypoints, target_keypoints, source_image_size, target_image_size } = feature_matches;
 
     // 清空画布
@@ -91,8 +148,8 @@ export function FeatureMatchingVisualization({
     const targetWidth = target_image_size[0] * targetScale * scale;
     const targetHeight = target_image_size[1] * targetScale * scale;
 
-    const totalWidth = sourceWidth + targetWidth + padding * 2;
-    const totalHeight = Math.max(sourceHeight, targetHeight) + padding * 2;
+    const totalWidth = sourceWidth + targetWidth + padding * 3;
+    const totalHeight = Math.max(sourceHeight, targetHeight) + padding * 2 + 30; // 为标签留出空间
 
     canvas.width = totalWidth;
     canvas.height = totalHeight;
@@ -101,30 +158,50 @@ export function FeatureMatchingVisualization({
     ctx.fillStyle = '#f8f9fa';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 绘制源图像
+    // 绘制源图像位置（为Source标签留出空间）
     const sourceX = padding + offset.x;
-    const sourceY = padding + offset.y;
+    const sourceY = padding + offset.y + 25; // 为Source标签留出空间
 
-    // 绘制目标图像
-    const targetX = sourceX + sourceWidth + padding;
-    const targetY = sourceY;
+    // 绘制目标图像位置
+    const targetX = sourceX + sourceWidth + padding + offset.x;
+    const targetY = sourceY + offset.y;
+
+    // 标注Source和Target
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Source', sourceX + sourceWidth / 2, sourceY - 10);
+    ctx.fillText('Target', targetX + targetWidth / 2, targetY - 10);
 
     // 加载并绘制实际图像
     const loadImage = (url: string): Promise<HTMLImageElement> => {
       return new Promise((resolve, reject) => {
         const img = new Image();
-        img.crossOrigin = 'anonymous'; // 允许跨域图像加载
-        img.onload = () => resolve(img);
-        img.onerror = () => {
-          console.warn(`Failed to load image: ${url}`);
+        img.crossOrigin = 'anonymous';
+        
+        const timeout = setTimeout(() => {
+          reject(new Error(`Image load timeout: ${url}`));
+        }, 10000);
+        
+        img.onload = () => {
+          clearTimeout(timeout);
+          resolve(img);
+        };
+        
+        img.onerror = (error) => {
+          clearTimeout(timeout);
+          console.error(`Failed to load image: ${url}`, error);
           reject(new Error(`Failed to load image: ${url}`));
         };
-        // 添加时间戳避免缓存问题
-        img.src = url.includes('?') ? `${url}&_t=${Date.now()}` : `${url}?_t=${Date.now()}`;
+        
+        let imageUrl = url;
+        if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+          imageUrl = `http://localhost:8000${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+        }
+        img.src = imageUrl.includes('?') ? `${imageUrl}&_t=${Date.now()}` : `${imageUrl}?_t=${Date.now()}`;
       });
     };
 
-    // 计算图像实际绘制位置和尺寸（保持宽高比）
     const calculateImageDisplay = (
       canvasWidth: number, canvasHeight: number,
       imageWidth: number, imageHeight: number
@@ -135,13 +212,11 @@ export function FeatureMatchingVisualization({
       let drawWidth, drawHeight, drawX, drawY;
 
       if (imgAspect > canvasAspect) {
-        // 图像更宽，以宽度为准
         drawWidth = canvasWidth;
         drawHeight = canvasWidth / imgAspect;
         drawX = 0;
         drawY = (canvasHeight - drawHeight) / 2;
       } else {
-        // 图像更高，以高度为准
         drawHeight = canvasHeight;
         drawWidth = canvasHeight * imgAspect;
         drawX = (canvasWidth - drawWidth) / 2;
@@ -155,14 +230,12 @@ export function FeatureMatchingVisualization({
     let targetDisplay = { drawX: targetX, drawY: targetY, drawWidth: targetWidth, drawHeight: targetHeight };
 
     try {
-      const sourceImg = await loadImage(imageUrls[selectedRegion.source_index]);
-      const targetImg = await loadImage(imageUrls[selectedRegion.target_index]);
+      const sourceImg = await loadImage(imageUrls[region.source_index]);
+      const targetImg = await loadImage(imageUrls[region.target_index]);
 
-      // 计算实际显示位置
       sourceDisplay = calculateImageDisplay(sourceWidth, sourceHeight, sourceImg.width, sourceImg.height);
       targetDisplay = calculateImageDisplay(targetWidth, targetHeight, targetImg.width, targetImg.height);
 
-      // 调整到画布坐标
       sourceDisplay.drawX += sourceX;
       sourceDisplay.drawY += sourceY;
       targetDisplay.drawX += targetX;
@@ -178,64 +251,77 @@ export function FeatureMatchingVisualization({
 
       // 绘制边框
       ctx.strokeStyle = '#dee2e6';
+      ctx.lineWidth = 2;
       ctx.strokeRect(sourceX, sourceY, sourceWidth, sourceHeight);
       ctx.strokeRect(targetX, targetY, targetWidth, targetHeight);
 
     } catch (error) {
-      console.warn('Failed to load images:', error);
-      // 降级到占位符
+      console.error('Failed to load images:', error);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      
       ctx.fillStyle = '#e9ecef';
       ctx.fillRect(sourceX, sourceY, sourceWidth, sourceHeight);
       ctx.fillRect(targetX, targetY, targetWidth, targetHeight);
-      ctx.strokeStyle = '#dee2e6';
+      ctx.strokeStyle = '#dc3545';
+      ctx.lineWidth = 2;
       ctx.strokeRect(sourceX, sourceY, sourceWidth, sourceHeight);
       ctx.strokeRect(targetX, targetY, targetWidth, targetHeight);
 
-      ctx.fillStyle = '#6c757d';
-      ctx.font = '14px sans-serif';
+      ctx.fillStyle = '#dc3545';
+      ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(imageFilenames[selectedRegion.source_index] || `Image ${selectedRegion.source_index + 1}`,
-                   sourceX + sourceWidth / 2, sourceY + sourceHeight / 2);
-      ctx.fillText(imageFilenames[selectedRegion.target_index] || `Image ${selectedRegion.target_index + 1}`,
-                   targetX + targetWidth / 2, targetY + targetHeight / 2);
+      ctx.fillText('图像加载失败', sourceX + sourceWidth / 2, sourceY + sourceHeight / 2 - 20);
+      ctx.fillText('图像加载失败', targetX + targetWidth / 2, targetY + targetHeight / 2 - 20);
+      
+      ctx.fillStyle = '#6c757d';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(imageFilenames[region.source_index] || `Image ${region.source_index + 1}`,
+                   sourceX + sourceWidth / 2, sourceY + sourceHeight / 2 + 10);
+      ctx.fillText(imageFilenames[region.target_index] || `Image ${region.target_index + 1}`,
+                   targetX + targetWidth / 2, targetY + targetHeight / 2 + 10);
     }
 
     // 绘制特征点和连线
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = 1;
     ctx.globalAlpha = 0.6;
 
-    const matches = showOnlyInliers ?
-      source_keypoints.slice(0, selectedRegion.inlier_count) :
-      source_keypoints;
-
-    for (let i = 0; i < matches.length; i++) {
+    const useInliersOnly = showOnlyInliers && region.inlier_count > 0;
+    const matchCount = useInliersOnly ? region.inlier_count : source_keypoints.length;
+    
+    for (let i = 0; i < matchCount; i++) {
       const srcKp = source_keypoints[i];
       const dstKp = target_keypoints[i];
 
-      // 计算特征点在图像显示区域中的实际位置
-      // 源图像特征点坐标
       const srcScaleX = sourceDisplay.drawWidth / source_image_size[0];
       const srcScaleY = sourceDisplay.drawHeight / source_image_size[1];
       const srcX = sourceDisplay.drawX + srcKp.x * srcScaleX;
       const srcY = sourceDisplay.drawY + srcKp.y * srcScaleY;
 
-      // 目标图像特征点坐标
       const dstScaleX = targetDisplay.drawWidth / target_image_size[0];
       const dstScaleY = targetDisplay.drawHeight / target_image_size[1];
       const dstX = targetDisplay.drawX + dstKp.x * dstScaleX;
       const dstY = targetDisplay.drawY + dstKp.y * dstScaleY;
 
+      let lineColor = '#00ff00';
+      let lineAlpha = 0.6;
+      
+      if (useInliersOnly && region.inlier_count > 0) {
+        lineColor = '#00ff00';
+        lineAlpha = 0.8;
+      } else if (!useInliersOnly && region.inlier_count > 0 && i >= region.inlier_count) {
+        lineColor = '#888888';
+        lineAlpha = 0.3;
+      }
+
       // 绘制连线
-      ctx.strokeStyle = `rgba(0, 255, 0, ${0.3 + (1 - srcKp.size / 50) * 0.4})`; // 根据特征点大小调整透明度
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = lineColor === '#00ff00' ? 'rgba(0, 255, 0, ' + lineAlpha + ')' : 'rgba(136, 136, 136, ' + lineAlpha + ')';
+      ctx.lineWidth = useInliersOnly ? 1.5 : 1;
       ctx.beginPath();
       ctx.moveTo(srcX, srcY);
       ctx.lineTo(dstX, dstY);
       ctx.stroke();
 
       // 绘制源图像中的特征点
-      ctx.fillStyle = '#ff0000';
+      ctx.fillStyle = useInliersOnly ? '#ff0000' : '#ff6666';
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -244,7 +330,7 @@ export function FeatureMatchingVisualization({
       ctx.stroke();
 
       // 绘制目标图像中的特征点
-      ctx.fillStyle = '#0000ff';
+      ctx.fillStyle = useInliersOnly ? '#0000ff' : '#6666ff';
       ctx.strokeStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(dstX, dstY, Math.max(3, dstKp.size * dstScaleX * 0.1), 0, 2 * Math.PI);
@@ -254,186 +340,181 @@ export function FeatureMatchingVisualization({
 
     ctx.globalAlpha = 1.0;
 
-    // 绘制图例
+    // 绘制图例和信息
     ctx.fillStyle = '#000000';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`匹配点数: ${matches.length}`, 10, 20);
-    ctx.fillText(`相似度: ${selectedRegion.score.toFixed(3)}`, 10, 40);
-
-    if (showOnlyInliers) {
-      ctx.fillText(`内点数: ${selectedRegion.inlier_count}`, 10, 60);
+    ctx.fillText(`匹配: ${matchCount}点`, 10, 20);
+    ctx.fillText(`相似度: ${region.score.toFixed(3)}`, 10, 35);
+    if (showOnlyInliers && region.inlier_count > 0) {
+      ctx.fillText(`内点: ${region.inlier_count}`, 10, 50);
     }
 
     // 图例
     ctx.fillStyle = '#ff0000';
-    ctx.fillRect(10, 80, 10, 10);
+    ctx.fillRect(10, totalHeight - 40, 10, 10);
     ctx.fillStyle = '#000000';
-    ctx.fillText('源图像特征点', 25, 89);
+    ctx.fillText('Source特征点', 25, totalHeight - 32);
 
     ctx.fillStyle = '#0000ff';
-    ctx.fillRect(10, 100, 10, 10);
+    ctx.fillRect(10, totalHeight - 25, 10, 10);
     ctx.fillStyle = '#000000';
-    ctx.fillText('目标图像特征点', 25, 109);
+    ctx.fillText('Target特征点', 25, totalHeight - 17);
   };
 
-  const handleZoomIn = () => setScale(prev => Math.min(prev * 1.2, 3));
-  const handleZoomOut = () => setScale(prev => Math.max(prev / 1.2, 0.5));
-  const handleReset = () => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
+  const handleZoomIn = (index: number) => {
+    const newScales = [...scales];
+    newScales[index] = Math.min((newScales[index] || 1) * 1.2, 3);
+    setScales(newScales);
   };
 
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    setIsDragging(true);
+  const handleZoomOut = (index: number) => {
+    const newScales = [...scales];
+    newScales[index] = Math.max((newScales[index] || 1) / 1.2, 0.5);
+    setScales(newScales);
+  };
+
+  const handleReset = (index: number) => {
+    const newScales = [...scales];
+    const newOffsets = [...offsets];
+    newScales[index] = 1;
+    newOffsets[index] = { x: 0, y: 0 };
+    setScales(newScales);
+    setOffsets(newOffsets);
+  };
+
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>, index: number) => {
+    setIsDragging({ index, active: true });
+    const offset = offsets[index] || { x: 0, y: 0 };
     setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isDragging) {
-      setOffset({
+    if (isDragging?.active) {
+      const newOffsets = [...offsets];
+      newOffsets[isDragging.index] = {
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y
-      });
+      };
+      setOffsets(newOffsets);
     }
   };
 
   const handleCanvasMouseUp = () => {
-    setIsDragging(false);
+    setIsDragging(null);
   };
 
-  const handleExportVisualization = () => {
-    if (!canvasRef.current) return;
+  const handleExportVisualization = (index: number) => {
+    const canvas = canvasRefs.current[index];
+    const region = top5Regions[index];
+    if (!canvas || !region) return;
 
     const link = document.createElement('a');
-    link.download = `feature-matches-${selectedRegion?.source_index}-${selectedRegion?.target_index}.png`;
-    link.href = canvasRef.current.toDataURL();
+    link.download = `feature-matches-${region.source_index}-${region.target_index}.png`;
+    link.href = canvas.toDataURL();
     link.click();
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>特征点匹配可视化</CardTitle>
+        <CardTitle>特征点匹配可视化 - Top 5</CardTitle>
         <CardDescription>
-          显示ORB特征点匹配结果，绿色连线表示匹配的特征点对
+          自动显示前5个最佳匹配结果，绿色连线表示匹配的特征点对
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {/* 区域选择 */}
-        <div className="flex items-center space-x-4">
-          <div className="flex-1">
-            <label className="text-sm font-medium mb-2 block">选择图像匹配对</label>
-            <Select
-              value={selectedRegion ? `${selectedRegion.source_index}-${selectedRegion.target_index}` : ""}
-              onValueChange={(value) => {
-                const [sourceIdx, targetIdx] = value.split('-').map(Number);
-                const region = regionsWithMatches.find(r =>
-                  r.source_index === sourceIdx && r.target_index === targetIdx
-                );
-                setSelectedRegion(region || null);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="选择要可视化的匹配对" />
-              </SelectTrigger>
-              <SelectContent>
-                {regionsWithMatches.map((region, index) => (
-                  <SelectItem
-                    key={index}
-                    value={`${region.source_index}-${region.target_index}`}
-                  >
-                    图像 {region.source_index + 1} ↔ 图像 {region.target_index + 1}
-                    (相似度: {region.score.toFixed(3)}, 匹配: {region.match_count}个)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {selectedRegion && (
-            <div className="flex items-center space-x-2">
-              <Badge variant="secondary">
-                匹配数: {selectedRegion.match_count}
-              </Badge>
-              <Badge variant="secondary">
-                内点数: {selectedRegion.inlier_count}
-              </Badge>
-              <Badge variant="secondary">
-                相似度: {selectedRegion.score.toFixed(3)}
-              </Badge>
-            </div>
-          )}
+      <CardContent className="space-y-6">
+        {/* 全局控制 */}
+        <div className="flex items-center space-x-2">
+          <label className="flex items-center space-x-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showOnlyInliers}
+              onChange={(e) => setShowOnlyInliers(e.target.checked)}
+              className="rounded"
+            />
+            <span>仅显示内点</span>
+          </label>
         </div>
 
-        {/* 控制按钮 */}
-        {selectedRegion && (
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={handleZoomIn}>
-              <ZoomIn className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleZoomOut}>
-              <ZoomOut className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleReset}>
-              <RotateCw className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportVisualization}>
-              <Download className="h-4 w-4" />
-              导出图片
-            </Button>
-            <label className="flex items-center space-x-2 text-sm">
-              <input
-                type="checkbox"
-                checked={showOnlyInliers}
-                onChange={(e) => setShowOnlyInliers(e.target.checked)}
-                className="rounded"
-              />
-              <span>仅显示内点</span>
-            </label>
-          </div>
-        )}
-
-        {/* 可视化画布 */}
-        {selectedRegion ? (
-          <div className="border rounded-lg overflow-auto bg-gray-50 p-4 relative">
-            {isLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
-                <div className="flex items-center space-x-2">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                  <span className="text-sm text-gray-600">正在加载图像...</span>
-                </div>
-              </div>
-            )}
-            <canvas
-              ref={canvasRef}
-              className="border border-gray-300 bg-white cursor-move"
-              onMouseDown={handleCanvasMouseDown}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onMouseLeave={handleCanvasMouseUp}
-            />
+        {/* 显示前5个匹配 */}
+        {top5Regions.length === 0 ? (
+          <div className="text-center text-muted-foreground py-8">
+            没有找到匹配的图像对
           </div>
         ) : (
-          <div className="border rounded-lg p-8 text-center text-gray-500 bg-gray-50">
-            请选择一个图像匹配对来显示特征点匹配可视化
-          </div>
-        )}
+          <div className="space-y-6">
+            {top5Regions.map((region, index) => (
+              <div key={`${region.source_index}-${region.target_index}`} className="border rounded-lg p-4 space-y-3">
+                {/* 匹配信息 */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {region.is_cross_document && (
+                      <Badge variant="default" className="bg-blue-600 text-xs px-1.5 py-0">
+                        跨文档
+                      </Badge>
+                    )}
+                    <span className="font-medium">
+                      图像 {region.source_index + 1} ↔ 图像 {region.target_index + 1}
+                    </span>
+                    <Badge variant="secondary">
+                      相似度: {region.score.toFixed(3)}
+                    </Badge>
+                    <Badge variant="secondary">
+                      匹配: {region.match_count}点
+                    </Badge>
+                    {region.inlier_count > 0 && (
+                      <Badge variant="secondary">
+                        内点: {region.inlier_count}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button variant="outline" size="sm" onClick={() => handleZoomIn(index)}>
+                      <ZoomIn className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleZoomOut(index)}>
+                      <ZoomOut className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleReset(index)}>
+                      <RotateCw className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleExportVisualization(index)}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* 文档信息 */}
+                {(region.source_document_filename || region.target_document_filename) && (
+                  <div className="text-xs text-muted-foreground">
+                    {region.source_document_filename && `源文档: ${region.source_document_filename}`}
+                    {region.source_document_filename && region.target_document_filename && " | "}
+                    {region.target_document_filename && `目标文档: ${region.target_document_filename}`}
+                  </div>
+                )}
 
-        {/* 提示信息 */}
-        {selectedRegion && (
-          <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
-            <p><strong>操作说明：</strong></p>
-            <ul className="list-disc list-inside space-y-1 mt-1">
-              <li><span className="text-red-600 font-semibold">红色圆点</span>：源图像中的ORB特征点（带白色边框）</li>
-              <li><span className="text-blue-600 font-semibold">蓝色圆点</span>：目标图像中的ORB特征点（带白色边框）</li>
-              <li><span className="text-green-600 font-semibold">绿色连线</span>：匹配的特征点对（透明度表示匹配质量）</li>
-              <li>特征点大小根据检测到的关键点尺度自动调整</li>
-              <li>图像保持原始宽高比显示</li>
-              <li>使用鼠标拖拽画布可以平移视图</li>
-              <li>使用缩放按钮调整显示大小</li>
-              <li>勾选"仅显示内点"可过滤掉低质量的匹配</li>
-            </ul>
+                {/* Canvas */}
+                <div className="border rounded-lg overflow-auto bg-muted/30 p-4">
+                  {isLoading ? (
+                    <div className="flex items-center justify-center h-64">
+                      <div className="text-muted-foreground">加载中...</div>
+                    </div>
+                  ) : (
+                    <canvas
+                      ref={(el) => {
+                        canvasRefs.current[index] = el;
+                      }}
+                      onMouseDown={(e) => handleCanvasMouseDown(e, index)}
+                      onMouseMove={handleCanvasMouseMove}
+                      onMouseUp={handleCanvasMouseUp}
+                      onMouseLeave={handleCanvasMouseUp}
+                      className="cursor-move"
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>

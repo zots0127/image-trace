@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Response
 from sqlmodel import select
 
 from .db import get_session
-from .models import Project, ProjectCreate, ProjectRead, Image, AnalysisResult
+from .models import Project, ProjectCreate, ProjectRead, Image, AnalysisResult, Document
 from .minio_client import storage_service
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -52,7 +52,6 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
 
 @router.get(
     "",
-    response_model=List[ProjectRead],
     summary="获取项目列表",
     description="""
     获取所有项目的列表，按创建时间倒序排列。
@@ -60,7 +59,7 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
     ## 返回信息：
     - 项目基本信息（名称、描述、状态）
     - 创建和更新时间
-    - 项目统计信息
+    - 项目统计信息（图片数量、文档数量、分析结果数量）
 
     ## 使用方式：
     ```bash
@@ -74,10 +73,42 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
     4. 显示最近的分析状态
     """
 )
-def list_projects() -> List[ProjectRead]:
+def list_projects():
     with get_session() as session:
         projects = session.exec(select(Project).order_by(Project.created_at.desc())).all()
-        return projects
+        result = []
+        for project in projects:
+            # 统计图片数量
+            image_count = session.exec(
+                select(Image).where(Image.project_id == project.id)
+            ).all()
+            image_count = len(image_count)
+            
+            # 统计文档数量
+            document_count = session.exec(
+                select(Document).where(Document.project_id == project.id)
+            ).all()
+            document_count = len(document_count)
+            
+            # 统计分析结果数量
+            analysis_count = session.exec(
+                select(AnalysisResult).where(AnalysisResult.project_id == project.id)
+            ).all()
+            analysis_count = len(analysis_count)
+            
+            # 构建返回数据
+            project_data = {
+                "id": str(project.id),
+                "name": project.name,
+                "description": project.description,
+                "created_at": project.created_at.isoformat(),
+                "updated_at": project.updated_at.isoformat(),
+                "image_count": image_count,
+                "document_count": document_count,
+                "analysis_count": analysis_count,
+            }
+            result.append(project_data)
+        return result
 
 
 @router.get(
@@ -123,6 +154,32 @@ def get_project(project_id: UUID) -> dict:
         # 获取项目分析结果
         analyses = session.exec(select(AnalysisResult).where(AnalysisResult.project_id == project_id)).all()
 
+        # 构建图片列表，包含文档信息
+        images_list = []
+        for img in images:
+            image_data = {
+                "id": str(img.id),
+                "filename": img.filename,
+                "file_size": img.file_size,
+                "mime_type": img.mime_type,
+                "created_at": img.created_at.isoformat(),
+                "public_url": f"/projects/{project_id}/images/{img.id}/file",
+                "object_name": img.file_path
+            }
+            
+            # 解析图片元数据，提取文档信息
+            if img.image_metadata:
+                try:
+                    metadata = json.loads(img.image_metadata)
+                    if metadata.get("source") == "document_extraction":
+                        image_data["document_filename"] = metadata.get("document_filename")
+                        image_data["document_id"] = metadata.get("document_id")
+                        image_data["source"] = "document"
+                except:
+                    pass
+            
+            images_list.append(image_data)
+
         return {
             "id": str(project.id),
             "name": project.name,
@@ -130,17 +187,7 @@ def get_project(project_id: UUID) -> dict:
             "status": project.status,
             "created_at": project.created_at.isoformat(),
             "updated_at": project.updated_at.isoformat(),
-            "images": [
-                {
-                    "id": str(img.id),
-                    "filename": img.filename,
-                    "file_size": img.file_size,
-                    "mime_type": img.mime_type,
-                    "created_at": img.created_at.isoformat(),
-                    "public_url": f"/projects/{project_id}/images/{img.id}/file",
-                    "object_name": img.file_path
-                } for img in images
-            ],
+            "images": images_list,
             "images_count": len(images),
             "analyses_count": len(analyses)
         }
@@ -183,8 +230,9 @@ def get_project_images(project_id: UUID) -> List[dict]:
 
         images = session.exec(select(Image).where(Image.project_id == project_id)).all()
 
-        return [
-            {
+        result = []
+        for img in images:
+            image_data = {
                 "id": str(img.id),
                 "filename": img.filename,
                 "file_size": img.file_size,
@@ -192,8 +240,22 @@ def get_project_images(project_id: UUID) -> List[dict]:
                 "created_at": img.created_at.isoformat(),
                 "public_url": f"/projects/{project_id}/images/{img.id}/file",
                 "object_name": img.file_path
-            } for img in images
-        ]
+            }
+            
+            # 解析图片元数据，提取文档信息
+            if img.image_metadata:
+                try:
+                    metadata = json.loads(img.image_metadata)
+                    if metadata.get("source") == "document_extraction":
+                        image_data["document_filename"] = metadata.get("document_filename")
+                        image_data["document_id"] = metadata.get("document_id")
+                        image_data["source"] = "document"
+                except:
+                    pass
+            
+            result.append(image_data)
+        
+        return result
 
 
 @router.get("/{project_id}/analyses/")
@@ -235,6 +297,8 @@ def get_project_analyses(project_id: UUID) -> List[dict]:
                 "results": results_data,
                 "confidence_score": analysis.confidence_score,
                 "processing_time_seconds": analysis.processing_time_seconds,
+                "status": analysis.status,
+                "error_message": analysis.error_message,
                 "created_at": analysis.created_at.isoformat()
             })
 
@@ -289,11 +353,15 @@ def get_image_file(project_id: UUID, image_id: UUID):
             )
 
             # 返回文件内容
+            # 正确编码文件名以支持中文和特殊字符
+            from urllib.parse import quote
+            encoded_filename = quote(image.filename)
+            
             return Response(
                 content=file_data,
                 media_type=image.mime_type or "application/octet-stream",
                 headers={
-                    "Content-Disposition": f"inline; filename={image.filename}",
+                    "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "GET",
                     "Access-Control-Allow-Headers": "*"

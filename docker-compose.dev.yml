@@ -1,0 +1,83 @@
+services:
+  # Redis特征缓存服务 (复用主配置)
+  redis:
+    extends:
+      file: docker-compose.yml
+      service: redis
+
+  # MinIO对象存储服务 (复用主配置)
+  minio:
+    extends:
+      file: docker-compose.yml
+      service: minio
+
+  # 本地后端开发服务
+  backend-dev:
+    container_name: image-trace-backend-dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./app.db
+      - REDIS_URL=redis://redis:6379/1
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_SECURE=false
+      - PYTHONPATH=/app
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    depends_on:
+      - redis
+      - minio
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # 本地前端开发服务
+  frontend-dev:
+    container_name: image-trace-frontend-dev
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:3000"
+    environment:
+      - VITE_API_BASE_URL=/api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend-dev
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+
+volumes:
+  # 后端上传目录
+  backend_uploads:
+    driver: local
+
+  # 后端日志目录
+  backend_logs:
+    driver: local
+
+  # Redis数据
+  redis_data:
+    driver: local
+
+  # MinIO数据
+  minio_data:
+    driver: local
+
+networks:
+  image-trace-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

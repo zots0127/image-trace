@@ -10,11 +10,22 @@ WORKDIR /app
 # 设置环境变量
 ENV NODE_ENV=production
 
+# 接收构建参数
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
+# 配置中科大npm镜像源
+RUN npm config set registry https://registry.npmmirror.com
+
 # 复制package文件
 COPY package*.json ./
 
-# 安装依赖
-RUN npm ci --only=production && npm cache clean --force
+# 安装依赖 - 处理 rollup ARM64 原生模块问题
+# 按照 npm 错误提示：删除 node_modules 和 package-lock.json 后重新安装
+RUN rm -rf node_modules package-lock.json && \
+    npm install && \
+    npm install @rollup/rollup-linux-arm64-musl --save-dev --force && \
+    npm cache clean --force
 
 # 复制源代码
 COPY . .

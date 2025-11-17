@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getProjects, deleteProject, type Project } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
 import { useAuth } from "@/contexts/AuthContext";
+import { useGlobalError } from "@/contexts/ErrorContext";
 import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/CreateProjectDialog";
 import { ProjectCard } from "@/components/ProjectCard";
@@ -14,6 +15,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { showErrorFromException } = useGlobalError();
 
   const loadProjects = async () => {
     setLoading(true);
@@ -25,26 +27,15 @@ export default function Dashboard() {
     } catch (error) {
       console.error("加载项目列表失败:", error);
       const err = error as APIError;
+
+      // 使用新的错误对话框系统
+      showErrorFromException(error, err.message || "无法连接到后端服务");
+
+      // 同时显示简短的 toast 通知
       toast({
         title: "加载失败",
         description: err.message || "无法连接到后端服务",
         variant: "destructive",
-        action: (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="bg-white/10 hover:bg-white/20 text-white border-white/20"
-            onClick={async () => {
-              const success = await copyErrorToClipboard(err);
-              if (success) {
-                toast({ title: "已复制错误详情" });
-              }
-            }}
-          >
-            <Copy className="h-3 w-3 mr-1" />
-            复制
-          </Button>
-        ),
       });
     } finally {
       setLoading(false);

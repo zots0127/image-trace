@@ -19,46 +19,64 @@ export function DocumentUploadZone({ projectId, onDocumentUploaded }: DocumentUp
   const { toast } = useToast();
 
   const pollDocumentStatus = async (documentId: string) => {
-    const maxAttempts = 60; // 最多轮询5分钟
+    const maxAttempts = 120; // 最多轮询10分钟（120次 * 5秒）
     let attempts = 0;
 
     const poll = async (): Promise<void> => {
       try {
+        attempts++;
+        console.log(`[文档轮询] 第 ${attempts} 次检查文档 ${documentId} 的状态`);
+        
         const doc = await getDocument(documentId);
         
-        if (doc.status === "completed") {
+        // 后端返回的是 processing_status 字段
+        const status = doc.processing_status || doc.status;
+        console.log(`[文档轮询] 文档状态: ${status}`);
+        
+        if (status === "completed") {
           setProcessing(null);
           toast({
             title: "文档处理完成",
             description: `已从文档中提取 ${doc.extracted_images_count || 0} 张图片`,
           });
           onDocumentUploaded(doc);
-        } else if (doc.status === "failed") {
+          return;
+        } else if (status === "failed") {
           setProcessing(null);
+          const errorMsg = doc.metadata?.error || doc.error || "未知错误";
           toast({
             title: "文档处理失败",
-            description: doc.error || "未知错误",
+            description: errorMsg,
             variant: "destructive",
           });
+          return;
         } else if (attempts < maxAttempts) {
-          attempts++;
+          // 继续轮询
           setTimeout(() => poll(), 5000); // 每5秒轮询一次
         } else {
           setProcessing(null);
           toast({
             title: "处理超时",
-            description: "文档处理时间过长，请稍后刷新查看",
+            description: `文档处理时间过长（已等待 ${Math.floor(attempts * 5 / 60)} 分钟），请刷新页面查看最新状态`,
             variant: "destructive",
           });
         }
       } catch (error) {
-        setProcessing(null);
-        const err = error as APIError;
-        toast({
-          title: "获取状态失败",
-          description: err.message,
-          variant: "destructive",
-        });
+        console.error(`[文档轮询] 获取状态失败 (第 ${attempts} 次):`, error);
+        
+        // 如果错误次数太多，停止轮询
+        if (attempts >= maxAttempts) {
+          setProcessing(null);
+          const err = error as APIError;
+          toast({
+            title: "获取状态失败",
+            description: `轮询 ${attempts} 次后仍无法获取文档状态: ${err.message}`,
+            variant: "destructive",
+          });
+        } else {
+          // 网络错误时，继续重试
+          setTimeout(() => poll(), 5000);
+        }
       }
     };
 

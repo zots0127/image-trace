@@ -1,50 +1,4 @@
 services:
-  # 后端API服务
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: image-trace-backend
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=sqlite:///app.db
-      - REDIS_URL=redis://redis:6379/1
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin123
-      - MINIO_SECURE=false
-    volumes:
-      - ./backend/app.db:/app/app.db
-      - ./backend/uploads:/app/uploads
-    depends_on:
-      - redis
-      - minio
-    networks:
-      - image-trace-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # 前端应用
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: image-trace-frontend
-    ports:
-      - "8080:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:8000
-    depends_on:
-      - backend
-    networks:
-      - image-trace-network
-    restart: unless-stopped
-
   # Redis特征缓存服务
   redis:
     image: redis:7.2-alpine
@@ -54,7 +8,6 @@ services:
     command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
     networks:
       - image-trace-network
     restart: unless-stopped
@@ -92,7 +45,6 @@ services:
       - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
     volumes:
       - minio_data:/data
-      - ./minio/config.json:/root/.minio/config.json
     command: server /data --console-address ":9001"
     networks:
       - image-trace-network
@@ -139,6 +91,3 @@ volumes:
 networks:
   image-trace-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16

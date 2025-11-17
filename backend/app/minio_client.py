@@ -37,18 +37,23 @@ class MinIOStorageService:
             secret_key=MINIO_SECRET_KEY,
             secure=MINIO_SECURE
         )
+        self._available = False
         self._ensure_buckets()
 
     def _ensure_buckets(self):
         """确保必要的存储桶存在"""
         try:
+            # Test connection
+            self.client.list_buckets()
+            self._available = True
             buckets = [UPLOADS_BUCKET, DOCUMENTS_BUCKET, EXTRACTED_BUCKET, ANALYSIS_BUCKET, TEMP_BUCKET]
             for bucket in buckets:
                 if not self.client.bucket_exists(bucket):
                     self.client.make_bucket(bucket)
                     print(f"Created bucket: {bucket}")
-        except S3Error as e:
-            print(f"Error ensuring buckets: {e}")
+        except Exception as e:
+            print(f"Warning: MinIO not available: {e}")
+            self._available = False
 
     def upload_file(
         self,
@@ -69,6 +74,9 @@ class MinIOStorageService:
         Returns:
             包含文件信息的字典
         """
+        if not self._available:
+            raise Exception("MinIO storage service is not available")
+
         try:
             # 生成唯一的对象名称
             file_extension = Path(filename).suffix

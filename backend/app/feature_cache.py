@@ -6,13 +6,16 @@ Redis特征缓存模块
 import json
 import pickle
 import hashlib
-from typing import Dict, List, Optional, Tuple, Any
+import asyncio
+import time
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from datetime import datetime, timedelta
 from uuid import UUID
+from functools import wraps
 import logging
 import redis
 from redis.asyncio import Redis as AsyncRedis
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ConnectionError, TimeoutError
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,8 @@ class ImageFeatureCache:
         self.redis_url = redis_url
         self._redis_client = None
         self._async_redis_client = None
+        self._connection_pool = None
+        self._async_connection_pool = None
 
         # 缓存配置
         self.default_ttl = 86400 * 30  # 30天过期
@@ -46,31 +51,98 @@ class ImageFeatureCache:
         # 批量操作大小
         self.batch_size = 100
 
+        # 重试配置
+        self.max_retries = 3
+        self.retry_delay = 1.0  # 秒
+
+    
+    async def _force_reconnect(self):
+        """强制重新连接异步Redis客户端（适用于新事件循环）"""
+        try:
+            if self._async_redis_client:
+                await self._async_redis_client.close()
+        except Exception as e:
+            logger.debug(f"Error closing async redis client: {e}")
+        
+        try:
+            if self._async_connection_pool:
+                await self._async_connection_pool.disconnect()
+        except Exception as e:
+            logger.debug(f"Error disconnecting async connection pool: {e}")
+
+        # 重置所有异步连接相关的实例变量
+        self._async_redis_client = None
+        self._async_connection_pool = None
+        
+        # 在当前事件循环中创建新的连接
+        try:
+            client = await self.async_redis_client
+            await client.ping()
+            logger.info("Redis reconnection successful")
+        except Exception as e:
+            logger.error(f"Redis reconnection failed: {e}")
+            raise
+
+    def _force_sync_reconnect(self):
+        """强制重新连接同步Redis客户端"""
+        try:
+            if self._redis_client:
+                self._redis_client.close()
+            if self._connection_pool:
+                self._connection_pool.disconnect()
+        except:
+            pass
+
+        self._redis_client = None
+        self._connection_pool = None
+
     @property
     def redis_client(self):
-        """同步Redis客户端（懒加载）"""
+        """同步Redis客户端（懒加载，带连接池）"""
         if self._redis_client is None:
-            self._redis_client = redis.from_url(
-                self.redis_url,
-                decode_responses=False,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
+            from redis.connection import ConnectionPool
+
+            # 创建连接池
+            if self._connection_pool is None:
+                self._connection_pool = ConnectionPool.from_url(
+                    self.redis_url,
+                    decode_responses=False,
+                    socket_connect_timeout=10,
+                    socket_timeout=10,
+                    retry_on_timeout=True,
+                    health_check_interval=30,
+                    max_connections=20,  # 连接池大小
+                    socket_keepalive=True,  # 保持连接活跃
+                    socket_keepalive_options={}
+                )
+
+            self._redis_client = redis.Redis(
+                connection_pool=self._connection_pool
             )
         return self._redis_client
 
     @property
     async def async_redis_client(self):
-        """异步Redis客户端（懒加载）"""
+        """异步Redis客户端（懒加载，带连接池和自动重连）"""
         if self._async_redis_client is None:
-            self._async_redis_client = AsyncRedis.from_url(
-                self.redis_url,
-                decode_responses=False,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
+            from redis.asyncio import ConnectionPool as AsyncConnectionPool
+
+            # 创建异步连接池
+            if self._async_connection_pool is None:
+                self._async_connection_pool = AsyncConnectionPool.from_url(
+                    self.redis_url,
+                    decode_responses=False,
+                    socket_connect_timeout=10,
+                    socket_timeout=10,
+                    retry_on_timeout=True,
+                    health_check_interval=30,
+                    max_connections=20,  # 连接池大小
+                    socket_keepalive=True,  # 保持连接活跃
+                    socket_keepalive_options={}
+                )
+
+            self._async_redis_client = AsyncRedis(
+                connection_pool=self._async_connection_pool
             )
         return self._async_redis_client
 
@@ -85,6 +157,31 @@ class ImageFeatureCache:
     def _get_stats_key(self, metric: str) -> str:
         """生成统计键"""
         return f"{self.stats_prefix}{metric}"
+
+    async def _ensure_connection(self):
+        """确保Redis连接可用，如果连接关闭则重新连接"""
+        try:
+            client = await self.async_redis_client
+            # 尝试一个轻量级操作来检查连接
+            await client.ping()
+        except (RedisError, ConnectionError, OSError) as e:
+            # 连接已关闭，重置并重新创建
+            logger.warning(f"Redis connection lost, reconnecting: {e}")
+            try:
+                if self._async_redis_client:
+                    await self._async_redis_client.close()
+            except:
+                pass
+            self._async_redis_client = None
+            # 重新创建连接
+            self._async_redis_client = AsyncRedis.from_url(
+                self.redis_url,
+                decode_responses=False,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                retry_on_timeout=True,
+                health_check_interval=30
+            )
 
     def _serialize_features(self, features: Dict[str, Any]) -> bytes:
         """序列化特征数据（使用pickle，更高效）"""
@@ -126,7 +223,7 @@ class ImageFeatureCache:
         ttl: Optional[int] = None
     ) -> bool:
         """
-        缓存单张图像的特征
+        缓存单张图像的特征（带重试机制）
 
         Args:
             image_id: 图像ID
@@ -193,8 +290,10 @@ class ImageFeatureCache:
             logger.info(f"Successfully cached features for image {image_id}")
             return True
 
-        except RedisError as e:
+        except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to cache features for image {image_id}: {e}")
+            # 强制重新连接所有连接
+            await self._force_reconnect()
             return False
 
     async def get_image_features(self, image_id: str, feature_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -269,9 +368,10 @@ class ImageFeatureCache:
                     await client.incr(self._get_stats_key("cache_misses"))
                     return None
 
-        except RedisError as e:
+        except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to get features for image {image_id}: {e}")
-            await client.incr(self._get_stats_key("cache_errors"))
+            # 强制重新连接所有连接
+            await self._force_reconnect()
             return None
 
     async def batch_get_features(self, image_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -354,9 +454,11 @@ class ImageFeatureCache:
             logger.info(f"Batch retrieved features for {len(results)}/{len(image_ids)} images")
             return results
 
-        except RedisError as e:
+        except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to batch get features: {e}")
-            await client.incr(self._get_stats_key("cache_errors"))
+            # 强制重新连接所有连接
+            await self._force_reconnect()
+            # 返回已获取的结果（如果有），如果没有则返回空字典
             return results
 
     async def invalidate_image_cache(self, image_id: str) -> bool:
@@ -398,8 +500,13 @@ class ImageFeatureCache:
             logger.info(f"Successfully invalidated cache for image {image_id}")
             return True
 
-        except RedisError as e:
+        except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to invalidate cache for image {image_id}: {e}")
+            # 重置连接，下次会自动重连
+            try:
+                self._async_redis_client = None
+            except:
+                pass
             return False
 
     async def get_cache_stats(self) -> Dict[str, Any]:
@@ -434,8 +541,13 @@ class ImageFeatureCache:
 
             return stats
 
-        except RedisError as e:
+        except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to get cache stats: {e}")
+            # 重置连接，下次会自动重连
+            try:
+                self._async_redis_client = None
+            except:
+                pass
             return {}
 
     async def cleanup_expired_features(self) -> int:
@@ -479,9 +591,66 @@ class ImageFeatureCache:
             logger.info(f"Cleaned up {cleaned_count} expired feature keys")
             return cleaned_count
 
-        except RedisError as e:
+        except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to cleanup expired features: {e}")
+            # 重置连接，下次会自动重连
+            try:
+                self._async_redis_client = None
+            except:
+                pass
             return 0
+
+    async def _execute_redis_operation(self, operation_func, operation_name: str = "Redis operation"):
+        """统一的Redis操作执行器，自动处理连接和重试"""
+        last_exception = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                # 确保客户端可用
+                client = await self.async_redis_client
+                return await operation_func(client)
+            except (ConnectionError, TimeoutError, RedisError) as e:
+                last_exception = e
+                if attempt < self.max_retries:
+                    logger.warning(f"{operation_name} failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}")
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                    # 强制重新连接
+                    await self._force_reconnect()
+                else:
+                    logger.error(f"{operation_name} failed after {self.max_retries + 1} attempts: {e}")
+            except Exception as e:
+                logger.error(f"{operation_name} encountered unexpected error: {e}")
+                raise e
+        raise last_exception
+
+    async def ping(self) -> Dict[str, Any]:
+        """
+        测试Redis连接状态（带重试机制）
+
+        Returns:
+            Dict containing connection status and Redis info
+        """
+        async def ping_operation(client):
+            # 测试基本连接
+            pong = await client.ping()
+            # 获取Redis信息
+            info = await client.info()
+            return {
+                "status": "connected",
+                "pong": pong,
+                "redis_version": info.get("redis_version", "unknown"),
+                "connected_clients": info.get("connected_clients", 0),
+                "used_memory": info.get("used_memory_human", "unknown"),
+                "uptime_in_seconds": info.get("uptime_in_seconds", 0)
+            }
+
+        try:
+            return await self._execute_redis_operation(ping_operation, "Redis ping")
+        except Exception as e:
+            return {
+                "status": "disconnected",
+                "error": str(e),
+                "pong": False
+            }
 
     async def close(self):
         """关闭Redis连接"""

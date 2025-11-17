@@ -96,6 +96,7 @@ class AnalysisResultBase(SQLModel):
     status: str = Field(default="pending", max_length=20)  # pending, processing, completed, failed
     progress: float = Field(default=0.0)  # 0.0 to 1.0
     error_message: Optional[str] = Field(default=None)
+    completed_at: Optional[datetime] = Field(default=None)
 
 
 class AnalysisResult(AnalysisResultBase, table=True):
@@ -108,6 +109,7 @@ class AnalysisResult(AnalysisResultBase, table=True):
 class AnalysisResultRead(AnalysisResultBase):
     id: UUID
     created_at: datetime
+    completed_at: Optional[datetime] = None
 
 
 class DocumentBase(SQLModel):
