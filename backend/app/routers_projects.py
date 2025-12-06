@@ -162,6 +162,7 @@ def get_project(project_id: UUID) -> dict:
                 "filename": img.filename,
                 "file_size": img.file_size,
                 "mime_type": img.mime_type,
+                "checksum": img.checksum,
                 "created_at": img.created_at.isoformat(),
                 "public_url": f"/projects/{project_id}/images/{img.id}/file",
                 "object_name": img.file_path
@@ -237,6 +238,7 @@ def get_project_images(project_id: UUID) -> List[dict]:
                 "filename": img.filename,
                 "file_size": img.file_size,
                 "mime_type": img.mime_type,
+                "checksum": img.checksum,
                 "created_at": img.created_at.isoformat(),
                 "public_url": f"/projects/{project_id}/images/{img.id}/file",
                 "object_name": img.file_path
@@ -369,3 +371,31 @@ def get_image_file(project_id: UUID, image_id: UUID):
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to retrieve image: {str(e)}")
+@router.get("/{project_id}/images/by-checksum/{checksum}")
+def get_images_by_checksum(project_id: UUID, checksum: str) -> List[dict]:
+    with get_session() as session:
+        project = session.get(Project, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        images = session.exec(select(Image).where((Image.project_id == project_id) & (Image.checksum == checksum))).all()
+        result = []
+        for img in images:
+            data = {
+                "id": str(img.id),
+                "filename": img.filename,
+                "file_size": img.file_size,
+                "mime_type": img.mime_type,
+                "checksum": img.checksum,
+                "created_at": img.created_at.isoformat(),
+                "public_url": f"/projects/{project_id}/images/{img.id}/file",
+                "object_name": img.file_path
+            }
+            if img.image_metadata:
+                try:
+                    metadata = json.loads(img.image_metadata)
+                    data["metadata"] = metadata
+                except:
+                    data["metadata"] = {"raw": img.image_metadata}
+            result.append(data)
+        return result

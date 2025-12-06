@@ -11,14 +11,19 @@ class SupabaseService:
     """Supabase服务类，用于用户认证和数据管理"""
 
     def __init__(self):
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
-
-        self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        if SUPABASE_URL and SUPABASE_KEY:
+            self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        else:
+            self.client = None
 
     def sign_up(self, email: str, password: str) -> Dict[str, Any]:
         """用户注册"""
         try:
+            if not self.client:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider not configured"
+                )
             response = self.client.auth.sign_up({
                 "email": email,
                 "password": password
@@ -33,6 +38,11 @@ class SupabaseService:
     def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         """用户登录"""
         try:
+            if not self.client:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider not configured"
+                )
             response = self.client.auth.sign_in_with_password({
                 "email": email,
                 "password": password
@@ -47,6 +57,8 @@ class SupabaseService:
     def sign_out(self, access_token: str) -> None:
         """用户登出"""
         try:
+            if not self.client:
+                return
             self.client.auth.sign_out(access_token)
         except Exception as e:
             raise HTTPException(
@@ -57,6 +69,8 @@ class SupabaseService:
     def get_user(self, access_token: str) -> Optional[Dict[str, Any]]:
         """获取当前用户信息"""
         try:
+            if not self.client:
+                return None
             self.client.auth.set_session(access_token, None)
             response = self.client.auth.get_user()
             return response.user if response.user else None
@@ -69,6 +83,8 @@ class SupabaseService:
     def verify_token(self, access_token: str) -> bool:
         """验证访问令牌是否有效"""
         try:
+            if not self.client:
+                return False
             user = self.get_user(access_token)
             return user is not None
         except:
@@ -77,6 +93,11 @@ class SupabaseService:
     def create_user_profile(self, user_id: str, email: str, display_name: str = None) -> Dict[str, Any]:
         """创建用户配置文件"""
         try:
+            if not self.client:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider not configured"
+                )
             profile_data = {
                 "id": user_id,
                 "email": email,
@@ -95,6 +116,11 @@ class SupabaseService:
     def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         """获取用户配置文件"""
         try:
+            if not self.client:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider not configured"
+                )
             response = self.client.table("user_profiles").select("*").eq("id", user_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:

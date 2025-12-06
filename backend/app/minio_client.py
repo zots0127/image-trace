@@ -20,6 +20,9 @@ MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 # 公网访问URL配置
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
 
+# 本地回退存储根目录（当 MinIO 不可用时使用）
+LOCAL_BASE_DIR = (Path(__file__).resolve().parents[2] / "data").resolve()
+
 # 存储桶名称
 UPLOADS_BUCKET = "image-trace-uploads"
 DOCUMENTS_BUCKET = "image-trace-documents"
@@ -41,9 +44,9 @@ class MinIOStorageService:
         self._ensure_buckets()
 
     def _ensure_buckets(self):
-        """确保必要的存储桶存在"""
+        """确保必要的存储桶存在；不可用时启用本地文件系统回退"""
         try:
-            # Test connection
+            # 测试连接
             self.client.list_buckets()
             self._available = True
             buckets = [UPLOADS_BUCKET, DOCUMENTS_BUCKET, EXTRACTED_BUCKET, ANALYSIS_BUCKET, TEMP_BUCKET]
@@ -54,6 +57,15 @@ class MinIOStorageService:
         except Exception as e:
             print(f"Warning: MinIO not available: {e}")
             self._available = False
+            # 启用本地回退目录
+            try:
+                buckets = [UPLOADS_BUCKET, DOCUMENTS_BUCKET, EXTRACTED_BUCKET, ANALYSIS_BUCKET, TEMP_BUCKET]
+                for bucket in buckets:
+                    local_bucket_dir = LOCAL_BASE_DIR / bucket
+                    local_bucket_dir.mkdir(parents=True, exist_ok=True)
+                    # 兼容已有本地目录结构（如 data/uploads/...），但统一使用 bucket 名称目录
+            except Exception as le:
+                print(f"Warning: Failed to initialize local fallback directories: {le}")
 
     def upload_file(
         self,
@@ -75,7 +87,31 @@ class MinIOStorageService:
             包含文件信息的字典
         """
         if not self._available:
-            raise Exception("MinIO storage service is not available")
+            # 本地文件系统回退
+            try:
+                file_extension = Path(filename).suffix
+                object_name = f"{datetime.now().strftime('%Y/%m/%d')}/{uuid.uuid4()}{file_extension}"
+
+                # 读取文件大小
+                file_data.seek(0, 2)
+                file_size = file_data.tell()
+                file_data.seek(0)
+
+                # 写入到本地 bucket 目录
+                local_path = (LOCAL_BASE_DIR / bucket / object_name).resolve()
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(local_path, "wb") as f:
+                    f.write(file_data.read())
+
+                return {
+                    "object_name": object_name,
+                    "bucket": bucket,
+                    "size": file_size,
+                    "etag": None,
+                    "local_url": f"{PUBLIC_BASE_URL}/{bucket}/{object_name}"
+                }
+            except Exception as e:
+                raise Exception(f"Failed to upload file (local fallback): {e}")
 
         try:
             # 生成唯一的对象名称
@@ -96,8 +132,6 @@ class MinIOStorageService:
                 part_size=10*1024*1024,  # 10MB分块
                 content_type=content_type
             )
-
-            # 不在这里生成公网URL，由API层根据需要生成
 
             return {
                 "object_name": object_name,
@@ -153,17 +187,40 @@ class MinIOStorageService:
         Returns:
             包含文件信息的字典
         """
+        if not self._available:
+            # 本地文件系统回退
+            try:
+                date_path = datetime.now().strftime('%Y/%m/%d')
+                object_name = f"{date_path}/{document_id}/{image_name}"
+
+                file_data.seek(0, 2)
+                file_size = file_data.tell()
+                file_data.seek(0)
+
+                local_path = (LOCAL_BASE_DIR / EXTRACTED_BUCKET / object_name).resolve()
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(local_path, "wb") as f:
+                    f.write(file_data.read())
+
+                return {
+                    "object_name": object_name,
+                    "bucket": EXTRACTED_BUCKET,
+                    "size": file_size,
+                    "etag": None,
+                    "local_url": f"{PUBLIC_BASE_URL}/{EXTRACTED_BUCKET}/{object_name}"
+                }
+            except Exception as e:
+                raise Exception(f"Failed to upload extracted image (local fallback): {e}")
+
         try:
             # 生成基于文档ID的对象路径
             date_path = datetime.now().strftime('%Y/%m/%d')
             object_name = f"{date_path}/{document_id}/{image_name}"
 
-            # 读取文件数据以获取大小
             file_data.seek(0, 2)
             file_size = file_data.tell()
             file_data.seek(0)
 
-            # 上传文件
             result = self.client.put_object(
                 bucket_name=EXTRACTED_BUCKET,
                 object_name=object_name,
@@ -172,8 +229,6 @@ class MinIOStorageService:
                 part_size=10*1024*1024,
                 content_type=content_type
             )
-
-            # 不在这里生成公网URL，由API层根据需要生成
 
             return {
                 "object_name": object_name,
@@ -203,6 +258,9 @@ class MinIOStorageService:
         Returns:
             预签名URL
         """
+        if not self._available:
+            # 返回本地路径（由API层用于拼接/转发）
+            return str((LOCAL_BASE_DIR / bucket / object_name).resolve())
         try:
             return self.client.presigned_get_object(
                 bucket_name=bucket,
@@ -227,6 +285,12 @@ class MinIOStorageService:
         Returns:
             文件数据
         """
+        if not self._available:
+            local_path = (LOCAL_BASE_DIR / bucket / object_name).resolve()
+            if not local_path.exists():
+                raise Exception(f"Local file not found: {local_path}")
+            with open(local_path, "rb") as f:
+                return f.read()
         try:
             response = self.client.get_object(bucket, object_name)
             return response.read()
@@ -248,6 +312,15 @@ class MinIOStorageService:
         Returns:
             是否成功删除
         """
+        if not self._available:
+            try:
+                local_path = (LOCAL_BASE_DIR / bucket / object_name).resolve()
+                if local_path.exists():
+                    local_path.unlink()
+                return True
+            except Exception as e:
+                print(f"Failed to delete local file: {e}")
+                return False
         try:
             self.client.remove_object(bucket, object_name)
             return True
@@ -270,6 +343,31 @@ class MinIOStorageService:
         Returns:
             文件列表
         """
+        if not self._available:
+            base_dir = (LOCAL_BASE_DIR / bucket).resolve()
+            results = []
+            for root, _, files in os.walk(base_dir):
+                for name in files:
+                    rel_path = os.path.relpath(Path(root) / name, base_dir)
+                    if prefix and not rel_path.startswith(prefix):
+                        continue
+                    full_path = Path(root) / name
+                    try:
+                        stat = full_path.stat()
+                        results.append({
+                            "object_name": rel_path.replace("\\", "/"),
+                            "size": stat.st_size,
+                            "last_modified": datetime.fromtimestamp(stat.st_mtime),
+                            "etag": None
+                        })
+                    except Exception:
+                        results.append({
+                            "object_name": rel_path.replace("\\", "/"),
+                            "size": None,
+                            "last_modified": None,
+                            "etag": None
+                        })
+            return results
         try:
             objects = self.client.list_objects(bucket, prefix=prefix)
             return [
@@ -295,10 +393,8 @@ class MinIOStorageService:
             存储桶信息
         """
         try:
-            # 获取存储桶统计信息
             files = self.list_files(bucket)
             total_size = sum(f["size"] for f in files if f["size"] is not None)
-
             return {
                 "bucket": bucket,
                 "file_count": len(files),
@@ -318,10 +414,26 @@ class MinIOStorageService:
         Returns:
             清理的文件数量
         """
+        if not self._available:
+            cutoff_time = datetime.now() - timedelta(hours=older_than_hours)
+            deleted_count = 0
+            base_dir = (LOCAL_BASE_DIR / TEMP_BUCKET).resolve()
+            if not base_dir.exists():
+                return 0
+            for root, _, files in os.walk(base_dir):
+                for name in files:
+                    full_path = Path(root) / name
+                    try:
+                        mtime = datetime.fromtimestamp(full_path.stat().st_mtime)
+                        if mtime < cutoff_time:
+                            full_path.unlink(missing_ok=True)
+                            deleted_count += 1
+                    except Exception:
+                        continue
+            return deleted_count
         try:
             cutoff_time = datetime.now() - timedelta(hours=older_than_hours)
             deleted_count = 0
-
             objects = self.client.list_objects(TEMP_BUCKET)
             for obj in objects:
                 if obj.last_modified.replace(tzinfo=None) < cutoff_time:
@@ -330,7 +442,6 @@ class MinIOStorageService:
                         deleted_count += 1
                     except S3Error:
                         pass
-
             return deleted_count
         except S3Error as e:
             raise Exception(f"Failed to cleanup temp files: {e}")

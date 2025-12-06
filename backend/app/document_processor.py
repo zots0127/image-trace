@@ -131,10 +131,10 @@ class DocumentProcessor:
                             print(f"Failed to extract image {img_index} from page {page_num}: {e}")
                             continue
 
-                # 方法2: 如果没有找到嵌入图片，将每页渲染为图片
+                # 方法2/3: 如果没有找到嵌入图片，将每页渲染为图片
                 if not images:
+                    # 优先尝试使用pdf2image（若环境支持poppler）
                     try:
-                        # 使用pdf2image将PDF页面转换为图像
                         pil_images = pdf2image.convert_from_bytes(
                             file_data,
                             dpi=200,
@@ -159,7 +159,32 @@ class DocumentProcessor:
                             images.append((img_data, extraction_metadata))
 
                     except Exception as e:
-                        print(f"Failed to render PDF pages as images: {e}")
+                        print(f"Failed to render PDF pages via pdf2image: {e}")
+
+                    # 若pdf2image不可用或失败，使用PyMuPDF进行页面渲染作为兜底
+                    if not images:
+                        try:
+                            with fitz.open(stream=file_data, filetype="pdf") as doc_render:
+                                for page_num in range(len(doc_render)):
+                                    page = doc_render[page_num]
+                                    # 使用放大矩阵以获得更清晰的图像
+                                    mat = fitz.Matrix(2.0, 2.0)
+                                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                                    img_data = pix.tobytes("png")
+
+                                    extraction_metadata = {
+                                        'source_page': page_num + 1,
+                                        'image_index': 1,
+                                        'extraction_method': 'pymupdf_render',
+                                        'width': pix.width,
+                                        'height': pix.height,
+                                        'color_space': 'RGB'
+                                    }
+
+                                    images.append((img_data, extraction_metadata))
+                                    pix = None
+                        except Exception as e:
+                            print(f"Failed to render PDF pages via PyMuPDF: {e}")
 
         except Exception as e:
             print(f"Failed to process PDF: {e}")

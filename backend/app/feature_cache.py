@@ -81,7 +81,7 @@ class ImageFeatureCache:
             logger.info("Redis reconnection successful")
         except Exception as e:
             logger.error(f"Redis reconnection failed: {e}")
-            raise
+            return
 
     def _force_sync_reconnect(self):
         """强制重新连接同步Redis客户端"""
@@ -371,7 +371,10 @@ class ImageFeatureCache:
         except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to get features for image {image_id}: {e}")
             # 强制重新连接所有连接
-            await self._force_reconnect()
+            try:
+                await self._force_reconnect()
+            except Exception:
+                pass
             return None
 
     async def batch_get_features(self, image_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -457,7 +460,10 @@ class ImageFeatureCache:
         except (RedisError, ConnectionError, OSError) as e:
             logger.error(f"Failed to batch get features: {e}")
             # 强制重新连接所有连接
-            await self._force_reconnect()
+            try:
+                await self._force_reconnect()
+            except Exception:
+                pass
             # 返回已获取的结果（如果有），如果没有则返回空字典
             return results
 
@@ -660,4 +666,23 @@ class ImageFeatureCache:
             self._redis_client.close()
 
 # 全局实例
-feature_cache = ImageFeatureCache()
+import os
+
+def _resolve_redis_url() -> str:
+    url = os.getenv("REDIS_URL")
+    if url and url.strip():
+        return url.strip()
+    host = (
+        os.getenv("IMAGE_TRACE_REDIS_SERVICE_HOST")
+        or os.getenv("REDIS_SERVICE_HOST")
+        or "localhost"
+    )
+    port = (
+        os.getenv("IMAGE_TRACE_REDIS_SERVICE_PORT_REDIS")
+        or os.getenv("REDIS_SERVICE_PORT")
+        or "6379"
+    )
+    db = os.getenv("REDIS_DB", "1")
+    return f"redis://{host}:{port}/{db}"
+
+feature_cache = ImageFeatureCache(redis_url=_resolve_redis_url())

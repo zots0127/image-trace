@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-trace-backend
+  namespace: image-trace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-trace-backend
+  template:
+    metadata:
+      labels:
+        app: image-trace-backend
+    spec:
+      containers:
+        - name: backend
+          image: image-trace-backend:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: image-trace-secrets
+                  key: DATABASE_URL
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: image-trace-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: image-trace-secrets
+                  key: MINIO_SECRET_KEY
+          envFrom:
+            - configMapRef:
+                name: image-trace-config
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+            - name: logs
+              mountPath: /app/logs
+          command: ["uvicorn","app.main:app","--host","0.0.0.0","--port","8000"]
+      volumes:
+        - name: uploads
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-trace-backend
+  namespace: image-trace
+spec:
+  type: NodePort
+  selector:
+    app: image-trace-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      nodePort: 30080

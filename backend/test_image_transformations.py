@@ -190,6 +190,67 @@ def test_similarity(image_paths: list, descriptions: list):
     success_rate = (high_sim_count + good_sim_count) / (n - 1) * 100 if n > 1 else 0
     print(f"\n总体成功率 (≥0.85): {success_rate:.1f}%")
     
+    try:
+        out_dir = os.path.join(os.path.dirname(image_paths[0]), "viz")
+        os.makedirs(out_dir, exist_ok=True)
+
+        n = len(sim_matrix)
+        if n > 0:
+            mat = np.array(sim_matrix, dtype=np.float32)
+            mat = np.clip(mat, 0.0, 1.0)
+            img = (mat * 255.0).astype(np.uint8)
+            img = cv2.resize(img, (n*20, n*20), interpolation=cv2.INTER_NEAREST)
+            colored = cv2.applyColorMap(img, cv2.COLORMAP_JET)
+            cv2.imwrite(os.path.join(out_dir, "similarity_heatmap.png"), colored)
+
+        base_regions = [r for r in regions if r.get("source_index") == 0]
+        best_by_target = {}
+        for r in base_regions:
+            t = r.get("target_index")
+            s = float(r.get("similarity", 0.0))
+            if t not in best_by_target or s > float(best_by_target[t].get("similarity", 0.0)):
+                best_by_target[t] = r
+
+        pairs = sorted(best_by_target.items(), key=lambda x: float(x[1].get("similarity", 0.0)), reverse=True)
+        for t, r in pairs:
+            if t == 0:
+                continue
+            matches = r.get("matches", [])
+            if not matches:
+                continue
+            img1 = cv2.imread(image_paths[0])
+            img2 = cv2.imread(image_paths[t])
+            if img1 is None or img2 is None:
+                continue
+            h1, w1 = img1.shape[:2]
+            h2, w2 = img2.shape[:2]
+            H = max(h1, h2)
+            s1 = H / float(h1)
+            s2 = H / float(h2)
+            img1r = cv2.resize(img1, (int(w1*s1), int(h1*s1)))
+            img2r = cv2.resize(img2, (int(w2*s2), int(h2*s2)))
+            canvas = np.zeros((H, img1r.shape[1] + img2r.shape[1], 3), dtype=np.uint8)
+            canvas[:, :img1r.shape[1]] = img1r
+            canvas[:, img1r.shape[1]:] = img2r
+            offset = img1r.shape[1]
+            ms = sorted(matches, key=lambda m: float(m.get("distance", 0.0)))[:80]
+            for k, m in enumerate(ms):
+                q = m.get("queryPoint", {})
+                tpt = m.get("trainPoint", {})
+                p1 = (int(float(q.get("x", 0.0)) * s1), int(float(q.get("y", 0.0)) * s1))
+                p2 = (int(float(tpt.get("x", 0.0)) * s2) + offset, int(float(tpt.get("y", 0.0)) * s2))
+                color = (int(50 + (k*3) % 205), int(100 + (k*5) % 155), int(150 + (k*7) % 105))
+                cv2.circle(canvas, p1, 3, color, -1)
+                cv2.circle(canvas, p2, 3, color, -1)
+                cv2.line(canvas, p1, p2, color, 1)
+            title = f"match_0_vs_{t}_sim_{float(r.get('similarity', 0.0)):.3f}.jpg"
+            cv2.imwrite(os.path.join(out_dir, title), canvas)
+
+        print(f"\n可视化输出目录: {out_dir}")
+        print("已生成: 相似度热图与若干匹配连线图")
+    except Exception as e:
+        print(f"可视化生成失败: {e}")
+
     return sim_matrix, match_counts, regions
 
 
@@ -246,4 +307,3 @@ if __name__ == "__main__":
         #     shutil.rmtree(temp_dir)
         #     print("临时目录已删除")
         pass
-

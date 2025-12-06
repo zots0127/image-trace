@@ -55,6 +55,27 @@ services:
       timeout: 20s
       retries: 3
 
+  # Postgres 数据库服务
+  postgres:
+    image: postgres:16-alpine
+    container_name: image-trace-postgres
+    environment:
+      - POSTGRES_USER=image_trace
+      - POSTGRES_PASSWORD=image_trace_pw
+      - POSTGRES_DB=image_trace
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U image_trace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # MinIO客户端（用于创建存储桶）- 暂时禁用
   # minio-client:
   #   image: minio/mc:latest
@@ -86,6 +107,10 @@ volumes:
 
   # MinIO数据
   minio_data:
+    driver: local
+
+  # Postgres数据
+  postgres_data:
     driver: local
 
 networks:

@@ -2,6 +2,7 @@ from typing import List
 from uuid import UUID
 import io
 import json
+import hashlib
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, BackgroundTasks
 from sqlmodel import Session, select
@@ -68,6 +69,7 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                     )
 
                     # 创建提取的图片记录
+                    img_checksum = hashlib.sha256(img_data).hexdigest()
                     extracted_image = ExtractedImage(
                         document_id=document_id,
                         project_id=project_id,
@@ -75,7 +77,7 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                         file_path=upload_result["object_name"],
                         file_size=upload_result["size"],
                         mime_type=f"image/{ext}",
-                        checksum=upload_result.get("etag"),
+                        checksum=img_checksum,
                         extraction_metadata=json.dumps(extraction_metadata)
                     )
                     session.add(extracted_image)
@@ -87,11 +89,12 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                         file_path=upload_result["object_name"],
                         file_size=upload_result["size"],
                         mime_type=f"image/{ext}",
-                        checksum=upload_result.get("etag"),
+                        checksum=img_checksum,
                         image_metadata=json.dumps({
                             "source": "document_extraction",
                             "document_id": str(document_id),
                             "document_filename": document.filename,
+                            "document_checksum": document.checksum,
                             "extraction_metadata": extraction_metadata
                         })
                     )
@@ -187,6 +190,8 @@ async def upload_document(
         content = await file.read()
         file_stream = io.BytesIO(content)
 
+        doc_checksum = hashlib.sha256(content).hexdigest()
+
         # 上传文档到MinIO
         upload_result = storage_service.upload_document(
             file_data=file_stream,
@@ -201,7 +206,7 @@ async def upload_document(
             file_path=upload_result["object_name"],
             file_size=upload_result["size"],
             mime_type=file.content_type,
-            checksum=upload_result.get("etag"),
+            checksum=doc_checksum,
             processing_status="pending"  # 设置为待处理状态
         )
 
@@ -278,6 +283,7 @@ def get_document(document_id: UUID) -> dict:
             "filename": document.filename,
             "file_size": document.file_size,
             "mime_type": document.mime_type,
+            "checksum": document.checksum,
             "processing_status": document.processing_status,
             "extracted_image_count": document.extracted_image_count,
             "public_url": public_url,
@@ -516,3 +522,26 @@ def delete_document(document_id: UUID) -> dict:
                 status_code=500,
                 detail=f"Failed to delete document: {str(e)}"
             )
+@router.get("/hash/{checksum}")
+def get_documents_by_hash(checksum: str) -> dict:
+    with get_session() as session:
+        documents = session.exec(select(Document).where(Document.checksum == checksum)).all()
+        return {
+            "checksum": checksum,
+            "count": len(documents),
+            "documents": [
+                {
+                    "id": str(doc.id),
+                    "project_id": str(doc.project_id),
+                    "filename": doc.filename,
+                    "file_size": doc.file_size,
+                    "mime_type": doc.mime_type,
+                    "checksum": doc.checksum,
+                    "processing_status": doc.processing_status,
+                    "extracted_image_count": doc.extracted_image_count,
+                    "created_at": doc.created_at.isoformat(),
+                    "updated_at": doc.updated_at.isoformat()
+                }
+                for doc in documents
+            ]
+        }

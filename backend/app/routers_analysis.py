@@ -134,9 +134,10 @@ def _compute_enhanced_similarity(
     if not matches:
         return 0.0
 
-    # 基础匹配比例
+    # 基础匹配比例（对描述子数量进行上限裁剪，避免多尺度导致比例过低）
     min_descriptors = min(des1_count, des2_count)
-    match_ratio = len(matches) / min_descriptors if min_descriptors > 0 else 0
+    effective_descriptors = max(1, min(min_descriptors, 2000))
+    match_ratio = len(matches) / float(effective_descriptors)
 
     # 内点质量权重（如果有RANSAC结果）
     inlier_ratio = 0.0
@@ -151,12 +152,12 @@ def _compute_enhanced_similarity(
     # 距离一致性（标准差越小越好）
     distance_consistency = 1.0 / (1.0 + np.std(distances) / 20.0)
 
-    # 综合评分权重（根据图像大小调整）
+    # 综合评分权重（提高几何一致性权重）
     base_weights = {
-        'match_ratio': 0.4,
-        'inlier_ratio': 0.3 if inlier_count > 0 else 0.0,
-        'distance_score': 0.2,
-        'consistency': 0.1
+        'match_ratio': 0.25,
+        'inlier_ratio': 0.55 if inlier_count > 0 else 0.0,
+        'distance_score': 0.15,
+        'consistency': 0.05
     }
 
     # 动态调整权重
@@ -385,7 +386,13 @@ async def _compute_fast_features_cached(image_id: str, image_path: str) -> Tuple
         "computed_at": time.time()
     }
 
-    await feature_cache.cache_image_features(image_id, {"fast": fast_data})
+    try:
+        await feature_cache.cache_image_features(image_id, {"fast": fast_data})
+    except Exception as e:
+        try:
+            print(f"Fast feature cache skipped for {image_id}: {e}")
+        except Exception:
+            pass
 
     return avg_color, ahash
 
@@ -584,11 +591,27 @@ def _orb_pairwise_analysis(
 
             # 检查是否涉及截图
             is_screenshot_pair = screenshot_modes[i] or screenshot_modes[j]
+            is_crop_pair = False
+            try:
+                h1, w1 = images[i].shape[:2]
+                h2, w2 = images[j].shape[:2]
+                area1 = float(w1 * h1)
+                area2 = float(w2 * h2)
+                size_ratio = min(area1, area2) / max(area1, area2) if max(area1, area2) > 0 else 1.0
+                ar1 = float(w1) / float(h1) if h1 > 0 else 1.0
+                ar2 = float(w2) / float(h2) if h2 > 0 else 1.0
+                aspect_diff = abs(ar1 - ar2)
+                is_crop_pair = (size_ratio < 0.65) and (aspect_diff < 0.25)
+            except Exception:
+                is_crop_pair = False
             
             # 应用Lowe's ratio test过滤良好匹配
             # 对于极大比例变化的截图场景使用非常宽松的ratio
             # 因为大尺度变化会导致特征描述子差异增大
-            ratio_threshold = 0.85 if is_screenshot_pair else 0.75
+            if is_screenshot_pair or is_crop_pair:
+                ratio_threshold = 0.90
+            else:
+                ratio_threshold = 0.85
             
             matches = []
             for match_pair in knn_matches:
@@ -611,7 +634,7 @@ def _orb_pairwise_analysis(
             # 使用自适应匹配筛选（支持截图模式）
             good_matches = _adaptive_screenshot_match_filter(
                 matches,
-                screenshot_mode=is_screenshot_pair
+                screenshot_mode=(is_screenshot_pair or is_crop_pair)
             )
             count = len(good_matches)
 
@@ -652,12 +675,14 @@ def _orb_pairwise_analysis(
 
                     # 对于截图模式，使用非常宽松的RANSAC参数以处理极大尺度变化
                     if is_screenshot_pair:
-                        # 对于10倍或更大的缩放，需要非常宽松的阈值
-                        ransac_threshold = 15.0  # 非常宽松的阈值
-                        min_inliers = 2          # 最少内点要求
+                        ransac_threshold = 15.0
+                        min_inliers = 2
+                    elif is_crop_pair:
+                        ransac_threshold = 12.0
+                        min_inliers = 2
                     else:
-                        ransac_threshold = 8.0   # 标准阈值
-                        min_inliers = 3          # 标准内点要求
+                        ransac_threshold = 10.0
+                        min_inliers = 3
 
                     H, inlier_mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, ransac_threshold)
                     
@@ -802,8 +827,13 @@ def _orb_pairwise_analysis(
                         region["score"] = float(fallback_score)
                         region["similarity"] = float(fallback_score)
                         print(f"Screenshot fallback: {fallback_score:.3f} (no geometric verification)")
+                    elif is_crop_pair:
+                        fallback_score = score * 0.8
+                        region["score"] = float(fallback_score)
+                        region["similarity"] = float(fallback_score)
+                        print(f"Crop fallback: {fallback_score:.3f} (no geometric verification)")
                     else:
-                        fallback_score = score * 0.3
+                        fallback_score = score * 0.5
                         region["score"] = float(fallback_score)
                         region["similarity"] = float(fallback_score)
                         print(f"Standard fallback: {fallback_score:.3f} (no geometric verification)")
@@ -853,10 +883,11 @@ async def _run_analysis_task(
     start_time = time.time()
     temp_dir = None
 
-    # 重要：在新事件循环中强制重置Redis连接
-    # 因为Redis异步客户端与事件循环绑定，必须在新循环中重新连接
-    await feature_cache._force_reconnect()
-    print("🔄 Redis connection reset for new event loop")
+    try:
+        await feature_cache._force_reconnect()
+        print("🔄 Redis connection reset for new event loop")
+    except Exception as e:
+        print(f"⚠ Redis reconnect failed: {e}")
 
     try:
         with get_session() as session:
@@ -921,30 +952,23 @@ async def _run_analysis_task(
             # 服务健康检查
             print("Performing service health checks...")
 
-            # 检查Redis连接
+            # 检查Redis连接（不可用时继续执行）
             try:
                 await feature_cache.ping()
                 print("✅ Redis connection: OK")
             except Exception as e:
-                print(f"❌ Redis connection failed: {e}")
-                analysis.status = "failed"
-                analysis.error_message = f"Redis service unavailable: {str(e)}"
-                analysis.progress = 1.0
-                session.commit()
-                return
+                print(f"⚠ Redis unavailable, proceeding without cache: {e}")
 
-            # 检查MinIO连接
             try:
                 from .minio_client import storage_service
-                buckets = storage_service.client.list_buckets()
-                print(f"✅ MinIO connection: OK (found {len(buckets)} buckets)")
+                if getattr(storage_service, "_available", False):
+                    buckets = storage_service.client.list_buckets()
+                    print(f"✅ MinIO connection: OK (found {len(buckets)} buckets)")
+                else:
+                    print("✅ MinIO local filesystem fallback: OK")
             except Exception as e:
-                print(f"❌ MinIO connection failed: {e}")
-                analysis.status = "failed"
-                analysis.error_message = f"MinIO service unavailable: {str(e)}"
-                analysis.progress = 1.0
-                session.commit()
-                return
+                print(f"⚠ MinIO connection check failed: {e}")
+                print("Proceeding with local filesystem fallback")
 
             # 更新状态
             analysis.status = "running"
@@ -1207,6 +1231,7 @@ async def cache_health_check():
         return {
             "status": "healthy",
             "redis_connected": True,
+            "redis_url": feature_cache.redis_url,
             "used_memory": info.get("used_memory_human", "N/A"),
             "connected_clients": info.get("connected_clients", "N/A"),
             "uptime_seconds": info.get("uptime_in_seconds", "N/A")
@@ -1215,5 +1240,6 @@ async def cache_health_check():
         return {
             "status": "unhealthy",
             "redis_connected": False,
+            "redis_url": feature_cache.redis_url,
             "error": str(e)
         }

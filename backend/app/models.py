@@ -5,6 +5,7 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from sqlmodel import Field, SQLModel
+from sqlalchemy import Column, Text
 
 
 class UserBase(SQLModel):
@@ -88,8 +89,8 @@ class AnalysisResultBase(SQLModel):
     task_id: str = Field(max_length=100, unique=True)
     algorithm_type: str = Field(max_length=50)
     # Input parameters and results stored as JSON string
-    parameters: Optional[str] = Field(default=None)
-    results: Optional[str] = Field(default=None)
+    parameters: Optional[str] = Field(default=None, sa_column=Column(Text))
+    results: Optional[str] = Field(default=None, sa_column=Column(Text))
     confidence_score: Optional[float] = None
     processing_time_seconds: Optional[float] = Field(default=None)
     # Status and progress tracking

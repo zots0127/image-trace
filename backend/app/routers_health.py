@@ -7,8 +7,7 @@ from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
-
-from .db import get_session
+from .db import get_session, get_database_size
 from .models import Project, Image, AnalysisResult
 
 router = APIRouter(prefix="/health", tags=["health"])
@@ -95,9 +94,7 @@ def get_database_stats() -> Dict[str, Any]:
                 select(AnalysisResult).order_by(AnalysisResult.created_at.desc()).limit(5)
             ).all()
 
-            # 数据库文件大小
-            db_path = Path(__file__).resolve().parent.parent.parent / "image_trace.db"
-            db_size = db_path.stat().st_size if db_path.exists() else 0
+            db_size = get_database_size(session)
 
             return {
                 "projects": {

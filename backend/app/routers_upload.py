@@ -2,6 +2,7 @@ from typing import List
 from uuid import UUID
 import io
 import os
+import hashlib
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
@@ -32,6 +33,8 @@ async def upload_batch(
                 content = await file.read()
                 file_stream = io.BytesIO(content)
 
+                checksum_sha256 = hashlib.sha256(content).hexdigest()
+
                 # 上传到MinIO
                 upload_result = storage_service.upload_file(
                     file_data=file_stream,
@@ -46,7 +49,7 @@ async def upload_batch(
                     file_path=upload_result["object_name"],  # 存储MinIO对象名
                     file_size=upload_result["size"],
                     mime_type=file.content_type,
-                    checksum=upload_result.get("etag"),
+                    checksum=checksum_sha256,
                     image_metadata=None,
                 )
                 session.add(image)

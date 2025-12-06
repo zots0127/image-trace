@@ -11,6 +11,34 @@ services:
       file: docker-compose.yml
       service: minio
 
+  # MariaDB 数据库服务（用于验证双数据库兼容）
+  mariadb:
+    image: mariadb:11
+    container_name: image-trace-mariadb
+    environment:
+      - MARIADB_USER=image_trace
+      - MARIADB_PASSWORD=image_trace_pw
+      - MARIADB_DATABASE=image_trace
+      - MARIADB_ROOT_PASSWORD=root_pw_dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot_pw_dev || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Postgres 数据库服务 (复用主配置)
+  postgres:
+    extends:
+      file: docker-compose.yml
+      service: postgres
+
   # 本地后端开发服务
   backend-dev:
     container_name: image-trace-backend-dev
@@ -18,20 +46,52 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "30080:8000"
     environment:
-      - DATABASE_URL=sqlite:///./app.db
+      - DATABASE_URL=postgresql+psycopg2://image_trace:image_trace_pw@postgres:5432/image_trace
       - REDIS_URL=redis://redis:6379/1
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin123
       - MINIO_SECURE=false
+      - PUBLIC_BASE_URL=http://localhost:30080
       - PYTHONPATH=/app
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
       - backend_logs:/app/logs
     depends_on:
+      - postgres
+      - redis
+      - minio
+    networks:
+      - image-trace-network
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # 本地后端开发服务（MariaDB 版本，用于兼容性验证）
+  backend-dev-mariadb:
+    container_name: image-trace-backend-dev-mariadb
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "30082:8000"
+    environment:
+      - DATABASE_URL=mysql+pymysql://image_trace:image_trace_pw@mariadb:3306/image_trace
+      - REDIS_URL=redis://redis:6379/1
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_SECURE=false
+      - PUBLIC_BASE_URL=http://localhost:30082
+      - PYTHONPATH=/app
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    depends_on:
+      - mariadb
       - redis
       - minio
     networks:
@@ -73,6 +133,14 @@ volumes:
 
   # MinIO数据
   minio_data:
+    driver: local
+
+  # Postgres数据
+  postgres_data:
+    driver: local
+
+  # MariaDB数据
+  mariadb_data:
     driver: local
 
 networks:
