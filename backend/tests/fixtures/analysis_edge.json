@@ -1,0 +1,28 @@
+{
+  "project_id": "6e1cbb2f-67bd-4c0b-8f0c-2a70254b7b22",
+  "name": "异常输入回归",
+  "images": [
+    {
+      "id": "f95af1d4-8b61-4e7a-a0a6-77c9d5e33001",
+      "filename": "tiny_icon.png",
+      "file_path": "tmp/tiny_icon.png",
+      "mime_type": "image/png",
+      "file_size": 921,
+      "checksum": "sha256:0011",
+      "metadata": { "source": "upload", "note": "32x32 png" }
+    },
+    {
+      "id": "184e4d95-8c66-478f-a3e4-5a88e2c87002",
+      "filename": "corrupted.jpg",
+      "file_path": "tmp/corrupted.jpg",
+      "mime_type": "image/jpeg",
+      "file_size": 1024,
+      "checksum": "sha256:dead",
+      "metadata": { "source": "upload" },
+      "corrupted": true
+    }
+  ],
+  "algorithm": "orb+ahash",
+  "parameters": { "match_percentile": 70, "screenshot_mode": true }
+}
+

@@ -5,9 +5,12 @@ from .db import init_db
 from .routers_projects import router as projects_router
 from .routers_upload import router as upload_router
 from .routers_analysis import router as analysis_router
+from .routers_analysis_clean import router as analysis_clean_router
 from .routers_health import router as health_router
 from .routers_auth import router as auth_router
 from .routers_documents import router as documents_router
+from .middlewares import request_id_middleware
+from .errors import add_exception_handlers
 
 app = FastAPI(
     title="Image Traceability Analysis API",
@@ -65,6 +68,11 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有请求头
 )
 
+app.middleware("http")(request_id_middleware)
+
+# 统一异常处理
+add_exception_handlers(app)
+
 
 @app.on_event("startup")
 async def on_startup() -> None:
@@ -82,3 +90,4 @@ app.include_router(projects_router)
 app.include_router(upload_router)
 app.include_router(documents_router)
 app.include_router(analysis_router)
+app.include_router(analysis_clean_router)

@@ -1,5 +1,3 @@
-import os
-from dotenv import load_dotenv
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -8,20 +6,7 @@ from typing import Optional, BinaryIO, Dict, Any
 from minio import Minio
 from minio.error import S3Error
 
-# 加载环境变量
-load_dotenv()
-
-# MinIO配置
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin123")
-MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
-
-# 公网访问URL配置
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
-
-# 本地回退存储根目录（当 MinIO 不可用时使用）
-LOCAL_BASE_DIR = (Path(__file__).resolve().parents[2] / "data").resolve()
+from .config import settings
 
 # 存储桶名称
 UPLOADS_BUCKET = "image-trace-uploads"
@@ -35,10 +20,10 @@ class MinIOStorageService:
 
     def __init__(self):
         self.client = Minio(
-            endpoint=MINIO_ENDPOINT,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            secure=MINIO_SECURE
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure
         )
         self._available = False
         self._ensure_buckets()
@@ -61,7 +46,7 @@ class MinIOStorageService:
             try:
                 buckets = [UPLOADS_BUCKET, DOCUMENTS_BUCKET, EXTRACTED_BUCKET, ANALYSIS_BUCKET, TEMP_BUCKET]
                 for bucket in buckets:
-                    local_bucket_dir = LOCAL_BASE_DIR / bucket
+                    local_bucket_dir = settings.local_data_dir.resolve() / bucket
                     local_bucket_dir.mkdir(parents=True, exist_ok=True)
                     # 兼容已有本地目录结构（如 data/uploads/...），但统一使用 bucket 名称目录
             except Exception as le:
@@ -98,7 +83,7 @@ class MinIOStorageService:
                 file_data.seek(0)
 
                 # 写入到本地 bucket 目录
-                local_path = (LOCAL_BASE_DIR / bucket / object_name).resolve()
+                local_path = (settings.local_data_dir.resolve() / bucket / object_name).resolve()
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(local_path, "wb") as f:
                     f.write(file_data.read())
@@ -108,7 +93,7 @@ class MinIOStorageService:
                     "bucket": bucket,
                     "size": file_size,
                     "etag": None,
-                    "local_url": f"{PUBLIC_BASE_URL}/{bucket}/{object_name}"
+                    "local_url": f"{settings.public_base_url}/{bucket}/{object_name}"
                 }
             except Exception as e:
                 raise Exception(f"Failed to upload file (local fallback): {e}")
@@ -138,7 +123,7 @@ class MinIOStorageService:
                 "bucket": bucket,
                 "size": file_size,
                 "etag": result.etag if hasattr(result, 'etag') else None,
-                "local_url": f"http://{MINIO_ENDPOINT}/{bucket}/{object_name}"
+                "local_url": f"http://{settings.minio_endpoint}/{bucket}/{object_name}"
             }
 
         except S3Error as e:
@@ -197,7 +182,7 @@ class MinIOStorageService:
                 file_size = file_data.tell()
                 file_data.seek(0)
 
-                local_path = (LOCAL_BASE_DIR / EXTRACTED_BUCKET / object_name).resolve()
+                local_path = (settings.local_data_dir.resolve() / EXTRACTED_BUCKET / object_name).resolve()
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(local_path, "wb") as f:
                     f.write(file_data.read())
@@ -207,7 +192,7 @@ class MinIOStorageService:
                     "bucket": EXTRACTED_BUCKET,
                     "size": file_size,
                     "etag": None,
-                    "local_url": f"{PUBLIC_BASE_URL}/{EXTRACTED_BUCKET}/{object_name}"
+                    "local_url": f"{settings.public_base_url}/{EXTRACTED_BUCKET}/{object_name}"
                 }
             except Exception as e:
                 raise Exception(f"Failed to upload extracted image (local fallback): {e}")
@@ -235,7 +220,7 @@ class MinIOStorageService:
                 "bucket": EXTRACTED_BUCKET,
                 "size": file_size,
                 "etag": result.etag if hasattr(result, 'etag') else None,
-                "local_url": f"http://{MINIO_ENDPOINT}/{EXTRACTED_BUCKET}/{object_name}"
+                "local_url": f"http://{settings.minio_endpoint}/{EXTRACTED_BUCKET}/{object_name}"
             }
 
         except S3Error as e:
@@ -260,7 +245,7 @@ class MinIOStorageService:
         """
         if not self._available:
             # 返回本地路径（由API层用于拼接/转发）
-            return str((LOCAL_BASE_DIR / bucket / object_name).resolve())
+            return str((settings.local_data_dir.resolve() / bucket / object_name).resolve())
         try:
             return self.client.presigned_get_object(
                 bucket_name=bucket,
@@ -286,7 +271,7 @@ class MinIOStorageService:
             文件数据
         """
         if not self._available:
-            local_path = (LOCAL_BASE_DIR / bucket / object_name).resolve()
+            local_path = (settings.local_data_dir.resolve() / bucket / object_name).resolve()
             if not local_path.exists():
                 raise Exception(f"Local file not found: {local_path}")
             with open(local_path, "rb") as f:
@@ -314,7 +299,7 @@ class MinIOStorageService:
         """
         if not self._available:
             try:
-                local_path = (LOCAL_BASE_DIR / bucket / object_name).resolve()
+                local_path = (settings.local_data_dir.resolve() / bucket / object_name).resolve()
                 if local_path.exists():
                     local_path.unlink()
                 return True
@@ -344,7 +329,7 @@ class MinIOStorageService:
             文件列表
         """
         if not self._available:
-            base_dir = (LOCAL_BASE_DIR / bucket).resolve()
+            base_dir = (settings.local_data_dir.resolve() / bucket).resolve()
             results = []
             for root, _, files in os.walk(base_dir):
                 for name in files:
@@ -417,7 +402,7 @@ class MinIOStorageService:
         if not self._available:
             cutoff_time = datetime.now() - timedelta(hours=older_than_hours)
             deleted_count = 0
-            base_dir = (LOCAL_BASE_DIR / TEMP_BUCKET).resolve()
+            base_dir = (settings.local_data_dir.resolve() / TEMP_BUCKET).resolve()
             if not base_dir.exists():
                 return 0
             for root, _, files in os.walk(base_dir):

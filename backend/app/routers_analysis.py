@@ -8,18 +8,25 @@ from uuid import UUID, uuid4
 
 import cv2  # type: ignore[import-not-found]
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from PIL import Image as PILImage
 from sqlmodel import select
 
 from .db import get_session
 from .models import AnalysisResult, AnalysisResultRead, Image
-from .feature_cache import feature_cache
+from .adapters.cache_redis import RedisCacheAdapter
+from .config import settings
+from .auth_dependency import require_user_optional
 
 
 
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+router = APIRouter(
+    prefix="/analysis",
+    tags=["analysis"],
+    dependencies=[Depends(require_user_optional)],
+)
+cache_adapter = RedisCacheAdapter()
 
 
 def _compute_average_color(image_path: str) -> List[float]:
@@ -367,7 +374,7 @@ async def _compute_fast_features_cached(image_id: str, image_path: str) -> Tuple
     计算快速特征（平均颜色 + aHash），优先从缓存获取
     """
     # 尝试从缓存获取fast特征
-    cached_fast = await feature_cache.get_image_features(image_id, "fast")
+    cached_fast = await cache_adapter.get_image_features(image_id, "fast")
     if cached_fast:
         print(f"Fast features loaded from cache for image {image_id}")
         avg_color = cached_fast.get("avg_color_features", [])
@@ -387,7 +394,7 @@ async def _compute_fast_features_cached(image_id: str, image_path: str) -> Tuple
     }
 
     try:
-        await feature_cache.cache_image_features(image_id, {"fast": fast_data})
+        await cache_adapter.cache_image_features(image_id, {"fast": fast_data})
     except Exception as e:
         try:
             print(f"Fast feature cache skipped for {image_id}: {e}")
@@ -402,7 +409,7 @@ async def _batch_compute_fast_features(image_ids: List[str], image_paths: List[s
     批量计算快速特征，利用缓存优化性能
     """
     # 批量尝试从缓存获取特征
-    cached_features = await feature_cache.batch_get_features(image_ids)
+    cached_features = await cache_adapter.batch_get_features(image_ids)
 
     avg_colors = []
     ahashes = []
@@ -954,7 +961,7 @@ async def _run_analysis_task(
 
             # 检查Redis连接（不可用时继续执行）
             try:
-                await feature_cache.ping()
+                await cache_adapter.get_cache_stats()
                 print("✅ Redis connection: OK")
             except Exception as e:
                 print(f"⚠ Redis unavailable, proceeding without cache: {e}")
@@ -1029,7 +1036,7 @@ async def _run_analysis_task(
                 final_sim.append(row)
 
             # 保存结果
-            analysis.results = json.dumps({
+            result_payload = {
                 "similarity_matrix": final_sim,
                 "fast_similarity": combined_fast_sim,
                 "orb_similarity": orb_sim,
@@ -1044,7 +1051,11 @@ async def _run_analysis_task(
                 "strategy": "dynamic_weighting",
                 "screenshot_detection": "enabled",
                 "features": ["color_histogram", "perceptual_hash", "orb_local_features"]
-            })
+            }
+
+            analysis.results = json.dumps(result_payload)
+            # 若数据库支持 JSONB，则同步写入结构化列，便于查询/演进
+            analysis.results_json = result_payload
 
             analysis.status = "completed"
             analysis.progress = 1.0
@@ -1113,19 +1124,22 @@ def start_analysis(
             raise HTTPException(status_code=400, detail="No actual image files found for project")
 
         # 创建分析记录
-        analysis = AnalysisResult(
-            project_id=project_id,
-            task_id=task_id,
-            algorithm_type="unified",
-            parameters=json.dumps({
+            params_payload = {
                 "strategy": "unified",
                 "methods": ["fast", "orb", "hybrid_weighting"],
                 "screenshot_detection": True,
                 "dynamic_weighting": True
-            }),
-            status="pending",
-            progress=0.0
-        )
+            }
+
+            analysis = AnalysisResult(
+                project_id=project_id,
+                task_id=task_id,
+                algorithm_type="unified",
+                parameters=json.dumps(params_payload),
+                parameters_json=params_payload,
+                status="pending",
+                progress=0.0
+            )
         session.add(analysis)
         session.commit()
         session.refresh(analysis)
@@ -1194,7 +1208,7 @@ async def get_cache_stats():
 async def invalidate_image_cache(image_id: UUID):
     """使指定图像的特征缓存失效"""
     try:
-        success = await feature_cache.invalidate_image_cache(str(image_id))
+                        success = await cache_adapter.invalidate_image_cache(str(image_id))
         return {
             "success": success,
             "message": f"Cache for image {image_id} {'invalidated' if success else 'failed to invalidate'}"

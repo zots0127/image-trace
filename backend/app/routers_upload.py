@@ -4,16 +4,26 @@ import io
 import os
 import hashlib
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from .db import get_session
 from .models import Image
 from .minio_client import storage_service
+from .adapters.storage_minio import MinioStorageAdapter
+from .adapters.cache_redis import RedisCacheAdapter
+from .config import settings
+from .auth_dependency import require_user_optional
 
 # 获取公网基础URL
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
 
-router = APIRouter(prefix="/upload", tags=["upload"])
+router = APIRouter(
+    prefix="/upload",
+    tags=["upload"],
+    dependencies=[Depends(require_user_optional)],
+)
+storage_adapter = MinioStorageAdapter()
+cache_adapter = RedisCacheAdapter()
 
 
 @router.post("/batch")
@@ -25,6 +35,14 @@ async def upload_batch(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
+    # 校验文件数量与类型/大小
+    for file in files:
+        if file.content_type not in settings.allowed_image_mime:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported mime type: {file.content_type}"
+            )
+
     saved_files: list[dict] = []
     with get_session() as session:
         for file in files:
@@ -33,12 +51,19 @@ async def upload_batch(
                 content = await file.read()
                 file_stream = io.BytesIO(content)
 
+                if len(content) > settings.upload_max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large (> {settings.upload_max_bytes} bytes): {file.filename}"
+                    )
+
                 checksum_sha256 = hashlib.sha256(content).hexdigest()
 
                 # 上传到MinIO
-                upload_result = storage_service.upload_file(
+                upload_result = storage_adapter.upload(
                     file_data=file_stream,
                     filename=file.filename,
+                    bucket="image-trace-uploads",
                     content_type=file.content_type or "application/octet-stream"
                 )
 

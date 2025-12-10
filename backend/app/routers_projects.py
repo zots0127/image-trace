@@ -2,14 +2,20 @@ from typing import List
 from uuid import UUID
 import json
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlmodel import select
+from sqlalchemy import func
 
 from .db import get_session
 from .models import Project, ProjectCreate, ProjectRead, Image, AnalysisResult, Document
 from .minio_client import storage_service
+from .auth_dependency import require_user_optional
 
-router = APIRouter(prefix="/projects", tags=["projects"])
+router = APIRouter(
+    prefix="/projects",
+    tags=["projects"],
+    dependencies=[Depends(require_user_optional)],
+)
 
 
 @router.post(
@@ -76,36 +82,40 @@ def create_project(payload: ProjectCreate) -> ProjectRead:
 def list_projects():
     with get_session() as session:
         projects = session.exec(select(Project).order_by(Project.created_at.desc())).all()
+        project_ids = [p.id for p in projects]
+
+        image_counts = {
+            row[0]: row[1]
+            for row in session.exec(
+                select(Image.project_id, func.count(Image.id)).where(Image.project_id.in_(project_ids)).group_by(Image.project_id)
+            ).all()
+        } if project_ids else {}
+
+        document_counts = {
+            row[0]: row[1]
+            for row in session.exec(
+                select(Document.project_id, func.count(Document.id)).where(Document.project_id.in_(project_ids)).group_by(Document.project_id)
+            ).all()
+        } if project_ids else {}
+
+        analysis_counts = {
+            row[0]: row[1]
+            for row in session.exec(
+                select(AnalysisResult.project_id, func.count(AnalysisResult.id)).where(AnalysisResult.project_id.in_(project_ids)).group_by(AnalysisResult.project_id)
+            ).all()
+        } if project_ids else {}
+
         result = []
         for project in projects:
-            # 统计图片数量
-            image_count = session.exec(
-                select(Image).where(Image.project_id == project.id)
-            ).all()
-            image_count = len(image_count)
-            
-            # 统计文档数量
-            document_count = session.exec(
-                select(Document).where(Document.project_id == project.id)
-            ).all()
-            document_count = len(document_count)
-            
-            # 统计分析结果数量
-            analysis_count = session.exec(
-                select(AnalysisResult).where(AnalysisResult.project_id == project.id)
-            ).all()
-            analysis_count = len(analysis_count)
-            
-            # 构建返回数据
             project_data = {
                 "id": str(project.id),
                 "name": project.name,
                 "description": project.description,
                 "created_at": project.created_at.isoformat(),
                 "updated_at": project.updated_at.isoformat(),
-                "image_count": image_count,
-                "document_count": document_count,
-                "analysis_count": analysis_count,
+                "image_count": image_counts.get(project.id, 0),
+                "document_count": document_counts.get(project.id, 0),
+                "analysis_count": analysis_counts.get(project.id, 0),
             }
             result.append(project_data)
         return result
@@ -168,16 +178,20 @@ def get_project(project_id: UUID) -> dict:
                 "object_name": img.file_path
             }
             
-            # 解析图片元数据，提取文档信息
-            if img.image_metadata:
+            # 解析图片元数据，提取文档信息（优先 JSON 列）
+            metadata = None
+            if getattr(img, "image_metadata_json", None):
+                metadata = img.image_metadata_json
+            elif img.image_metadata:
                 try:
                     metadata = json.loads(img.image_metadata)
-                    if metadata.get("source") == "document_extraction":
-                        image_data["document_filename"] = metadata.get("document_filename")
-                        image_data["document_id"] = metadata.get("document_id")
-                        image_data["source"] = "document"
                 except:
-                    pass
+                    metadata = {"raw": img.image_metadata}
+
+            if metadata and metadata.get("source") == "document_extraction":
+                image_data["document_filename"] = metadata.get("document_filename")
+                image_data["document_id"] = metadata.get("document_id")
+                image_data["source"] = "document"
             
             images_list.append(image_data)
 
@@ -244,16 +258,20 @@ def get_project_images(project_id: UUID) -> List[dict]:
                 "object_name": img.file_path
             }
             
-            # 解析图片元数据，提取文档信息
-            if img.image_metadata:
-                try:
-                    metadata = json.loads(img.image_metadata)
-                    if metadata.get("source") == "document_extraction":
-                        image_data["document_filename"] = metadata.get("document_filename")
-                        image_data["document_id"] = metadata.get("document_id")
-                        image_data["source"] = "document"
-                except:
-                    pass
+        # 解析图片元数据，提取文档信息（优先 JSON 列）
+        metadata = None
+        if getattr(img, "image_metadata_json", None):
+            metadata = img.image_metadata_json
+        elif img.image_metadata:
+            try:
+                metadata = json.loads(img.image_metadata)
+            except:
+                metadata = {"raw": img.image_metadata}
+
+        if metadata and metadata.get("source") == "document_extraction":
+            image_data["document_filename"] = metadata.get("document_filename")
+            image_data["document_id"] = metadata.get("document_id")
+            image_data["source"] = "document"
             
             result.append(image_data)
         
@@ -275,21 +293,27 @@ def get_project_analyses(project_id: UUID) -> List[dict]:
 
         result = []
         for analysis in analyses:
-            # 解析results字段（JSON字符串）
-            results_data = None
-            if analysis.results:
-                try:
-                    results_data = json.loads(analysis.results)
-                except:
-                    results_data = None
+            # 解析results字段（优先JSON列）
+            if getattr(analysis, "results_json", None) is not None:
+                results_data = analysis.results_json
+            else:
+                results_data = None
+                if analysis.results:
+                    try:
+                        results_data = json.loads(analysis.results)
+                    except:
+                        results_data = None
 
-            # 解析parameters字段
-            parameters_data = None
-            if analysis.parameters:
-                try:
-                    parameters_data = json.loads(analysis.parameters)
-                except:
-                    parameters_data = None
+            # 解析parameters字段（优先JSON列）
+            if getattr(analysis, "parameters_json", None) is not None:
+                parameters_data = analysis.parameters_json
+            else:
+                parameters_data = None
+                if analysis.parameters:
+                    try:
+                        parameters_data = json.loads(analysis.parameters)
+                    except:
+                        parameters_data = None
 
             result.append({
                 "id": str(analysis.id),

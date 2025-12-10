@@ -666,12 +666,16 @@ class ImageFeatureCache:
             self._redis_client.close()
 
 # 全局实例
-import os
+from .config import settings
+
 
 def _resolve_redis_url() -> str:
-    url = os.getenv("REDIS_URL")
-    if url and url.strip():
-        return url.strip()
+    """
+    优先使用集中配置的 Redis URL，保留对集群/服务发现变量的回退。
+    """
+    if settings.redis_url:
+        return settings.redis_url
+
     host = (
         os.getenv("IMAGE_TRACE_REDIS_SERVICE_HOST")
         or os.getenv("REDIS_SERVICE_HOST")
@@ -684,5 +688,6 @@ def _resolve_redis_url() -> str:
     )
     db = os.getenv("REDIS_DB", "1")
     return f"redis://{host}:{port}/{db}"
+
 
 feature_cache = ImageFeatureCache(redis_url=_resolve_redis_url())

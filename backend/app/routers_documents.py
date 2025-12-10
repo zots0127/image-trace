@@ -4,15 +4,25 @@ import io
 import json
 import hashlib
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, BackgroundTasks
 from sqlmodel import Session, select
 
 from .db import get_session
 from .models import Document, ExtractedImage, Image
 from .minio_client import storage_service
 from .document_processor import document_processor
+from .config import settings
+from .adapters.storage_minio import MinioStorageAdapter
+from .adapters.cache_redis import RedisCacheAdapter
+from .auth_dependency import require_user_optional
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/documents",
+    tags=["documents"],
+    dependencies=[Depends(require_user_optional)],
+)
+storage_adapter = MinioStorageAdapter()
+cache_adapter = RedisCacheAdapter()
 
 
 def process_document_images(document_id: UUID, project_id: UUID, file_data: bytes, filename: str, content_type: str):
@@ -35,6 +45,10 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                     "error": extraction_result['error'],
                     "format": extraction_result.get('format', 'unknown')
                 })
+            document.document_metadata_json = {
+                "error": extraction_result['error'],
+                "format": extraction_result.get('format', 'unknown')
+            }
                 session.commit()
                 print(f"Failed to extract images from document {document_id}: {extraction_result['error']}")
                 return
@@ -46,6 +60,7 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                 'processed_at': str(document.created_at)
             }
             document.document_metadata = json.dumps(metadata)
+            document.document_metadata_json = metadata
             document.processing_status = "completed"
             document.extracted_image_count = extraction_result['image_count']
 
@@ -78,7 +93,8 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                         file_size=upload_result["size"],
                         mime_type=f"image/{ext}",
                         checksum=img_checksum,
-                        extraction_metadata=json.dumps(extraction_metadata)
+                        extraction_metadata=json.dumps(extraction_metadata),
+                        extraction_metadata_json=extraction_metadata
                     )
                     session.add(extracted_image)
 
@@ -96,7 +112,14 @@ def process_document_images(document_id: UUID, project_id: UUID, file_data: byte
                             "document_filename": document.filename,
                             "document_checksum": document.checksum,
                             "extraction_metadata": extraction_metadata
-                        })
+                        }),
+                        image_metadata_json={
+                            "source": "document_extraction",
+                            "document_id": str(document_id),
+                            "document_filename": document.filename,
+                            "document_checksum": document.checksum,
+                            "extraction_metadata": extraction_metadata
+                        }
                     )
                     session.add(main_image)
                     session.flush()  # 获取ID
@@ -179,7 +202,7 @@ async def upload_document(
 
     # 检查文件类型
     supported_types = list(document_processor.SUPPORTED_FORMATS.keys())
-    if file.content_type not in supported_types:
+    if file.content_type not in supported_types or file.content_type not in settings.allowed_document_mime:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type: {file.content_type}. Supported types: {supported_types}"
@@ -190,12 +213,19 @@ async def upload_document(
         content = await file.read()
         file_stream = io.BytesIO(content)
 
+        if len(content) > settings.upload_max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (> {settings.upload_max_bytes} bytes): {file.filename}"
+            )
+
         doc_checksum = hashlib.sha256(content).hexdigest()
 
         # 上传文档到MinIO
-        upload_result = storage_service.upload_document(
+        upload_result = storage_adapter.upload(
             file_data=file_stream,
             filename=file.filename,
+            bucket="image-trace-documents",
             content_type=file.content_type or "application/octet-stream"
         )
 
@@ -275,7 +305,7 @@ def get_document(document_id: UUID) -> dict:
             raise HTTPException(status_code=404, detail="Document not found")
 
         # 生成公网访问URL
-        public_url = f"https://sotrages.0.af/image-trace-documents/{document.file_path}"
+        public_url = f"{settings.public_base_url}/documents/{document.file_path}"
 
         result = {
             "id": str(document.id),
@@ -292,7 +322,9 @@ def get_document(document_id: UUID) -> dict:
         }
 
         # 解析文档元数据
-        if document.document_metadata:
+        if document.document_metadata_json is not None:
+            result["metadata"] = document.document_metadata_json
+        elif document.document_metadata:
             try:
                 result["metadata"] = json.loads(document.document_metadata)
             except:
@@ -356,7 +388,7 @@ def get_extracted_images(document_id: UUID) -> dict:
 
         images_list = []
         for img in extracted_images:
-            public_url = f"https://sotrages.0.af/image-trace-extracted/{img.file_path}"
+            public_url = f"{settings.public_base_url}/extracted/{img.file_path}"
 
             image_data = {
                 "id": str(img.id),
@@ -368,7 +400,9 @@ def get_extracted_images(document_id: UUID) -> dict:
             }
 
             # 解析提取元数据
-            if img.extraction_metadata:
+            if img.extraction_metadata_json is not None:
+                image_data["extraction_metadata"] = img.extraction_metadata_json
+            elif img.extraction_metadata:
                 try:
                     image_data["extraction_metadata"] = json.loads(img.extraction_metadata)
                 except:
@@ -423,7 +457,7 @@ def get_project_documents(project_id: UUID) -> dict:
 
         documents_list = []
         for doc in documents:
-            public_url = f"https://sotrages.0.af/image-trace-documents/{doc.file_path}"
+            public_url = f"{settings.public_base_url}/documents/{doc.file_path}"
 
             doc_data = {
                 "id": str(doc.id),
@@ -436,6 +470,13 @@ def get_project_documents(project_id: UUID) -> dict:
                 "created_at": doc.created_at.isoformat(),
                 "updated_at": doc.updated_at.isoformat()
             }
+            if doc.document_metadata_json is not None:
+                doc_data["metadata"] = doc.document_metadata_json
+            elif doc.document_metadata:
+                try:
+                    doc_data["metadata"] = json.loads(doc.document_metadata)
+                except:
+                    doc_data["metadata"] = {"raw": doc.document_metadata}
             documents_list.append(doc_data)
 
         return {

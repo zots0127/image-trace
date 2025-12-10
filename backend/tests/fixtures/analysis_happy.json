@@ -1,0 +1,37 @@
+{
+  "project_id": "b7b6c3f8-6c70-4e5d-9a1b-9a31c5f2f111",
+  "name": "假冒产品比对",
+  "images": [
+    {
+      "id": "8f1d0d32-0f23-4c41-a91d-4455a7c1d001",
+      "filename": "box_front.jpg",
+      "file_path": "tmp/box_front.jpg",
+      "mime_type": "image/jpeg",
+      "file_size": 524123,
+      "checksum": "sha256:9c2e",
+      "metadata": {
+        "source": "upload",
+        "scene": "retail_shelf",
+        "capture_device": "iphone14",
+        "lighting": "indoor"
+      }
+    },
+    {
+      "id": "0c4a0c62-9d0b-4c6e-a1b1-7e5de9d52002",
+      "filename": "doc_page_2_extract.jpg",
+      "file_path": "tmp/doc_page_2_extract.jpg",
+      "mime_type": "image/jpeg",
+      "file_size": 287900,
+      "checksum": "sha256:aa3d",
+      "metadata": {
+        "source": "document_extraction",
+        "document_filename": "manual.pdf",
+        "document_id": "2be3b5cf-54b6-4ca6-8a7d-a8219b8e3001",
+        "page": 2
+      }
+    }
+  ],
+  "algorithm": "orb+ahash",
+  "parameters": { "match_percentile": 70, "screenshot_mode": false }
+}
+

@@ -5,7 +5,7 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from sqlmodel import Field, SQLModel
-from sqlalchemy import Column, Text
+from sqlalchemy import Column, Text, JSON
 
 
 class UserBase(SQLModel):
@@ -70,6 +70,7 @@ class ImageBase(SQLModel):
     checksum: Optional[str] = None
     # Arbitrary image metadata stored as JSON string
     image_metadata: Optional[str] = Field(default=None)
+    image_metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
 
 
 class Image(ImageBase, table=True):
@@ -91,6 +92,9 @@ class AnalysisResultBase(SQLModel):
     # Input parameters and results stored as JSON string
     parameters: Optional[str] = Field(default=None, sa_column=Column(Text))
     results: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # 结构化 JSON 列（Postgres/SQLite兼容），便于查询和演进
+    parameters_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    results_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
     confidence_score: Optional[float] = None
     processing_time_seconds: Optional[float] = Field(default=None)
     # Status and progress tracking
@@ -122,6 +126,7 @@ class DocumentBase(SQLModel):
     checksum: Optional[str] = None
     # Document metadata stored as JSON string (page count, author, etc.)
     document_metadata: Optional[str] = Field(default=None)
+    document_metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
     # Processing status
     processing_status: str = Field(default="pending", max_length=50)
     # Number of images extracted from this document
@@ -156,6 +161,7 @@ class ExtractedImageBase(SQLModel):
     checksum: Optional[str] = None
     # Extraction metadata (page number, position in document, etc.)
     extraction_metadata: Optional[str] = Field(default=None)
+    extraction_metadata_json: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
     # Reference to the main Image table if this image is also tracked there
     image_id: Optional[UUID] = Field(default=None, foreign_key="images.id")
 

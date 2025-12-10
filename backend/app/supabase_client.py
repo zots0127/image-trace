@@ -1,18 +1,15 @@
-import os
 from typing import Optional, Dict, Any
 from supabase import create_client, Client
 from fastapi import HTTPException, status
 
-# Supabase配置
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+from .config import settings
 
 class SupabaseService:
     """Supabase服务类，用于用户认证和数据管理"""
 
     def __init__(self):
-        if SUPABASE_URL and SUPABASE_KEY:
-            self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        if settings.supabase_url and settings.supabase_key:
+            self.client: Client = create_client(settings.supabase_url, settings.supabase_key)
         else:
             self.client = None
 
