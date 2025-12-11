@@ -2,13 +2,11 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getProject,
-  getProjectDocuments,
   getProjectImages,
   analyzeImages,
   type Project,
   type Image,
   type AnalysisResult,
-  type Document,
 } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
 import { ImageUploadZone } from "@/components/ImageUploadZone";
@@ -30,7 +28,6 @@ export default function ProjectDetail() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [images, setImages] = useState<Image[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
   const [compareResult, setCompareResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -40,13 +37,11 @@ export default function ProjectDetail() {
 
     setLoading(true);
     try {
-      const [projectData, documentsData, imagesData] = await Promise.all([
+      const [projectData, imagesData] = await Promise.all([
         getProject(projectId),
-        getProjectDocuments(projectId),
         getProjectImages(projectId),
       ]);
       setProject(projectData);
-      setDocuments(documentsData);
       setImages(imagesData);
     } catch (error) {
       const err = error as APIError;
@@ -85,9 +80,8 @@ export default function ProjectDetail() {
     setCompareResult(null);
   };
 
-  const handleDocumentUploaded = (document: Document) => {
-    setDocuments((prev) => [document, ...prev]);
-    // 重新加载项目以获取提取的图片
+  const handleDocumentUploaded = () => {
+    // 文档上传会产出图片，刷新即可
     loadProject();
   };
 
@@ -247,55 +241,6 @@ export default function ProjectDetail() {
           </CardContent>
         </Card>
 
-        {/* Documents */}
-        {documents.length > 0 && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>已上传文档</CardTitle>
-                <Badge variant="secondary">{documents.length} 个</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {documents.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="flex items-center justify-between p-4 rounded-lg border"
-                  >
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">{doc.filename}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {doc.extracted_images_count !== undefined && (
-                            <>提取 {doc.extracted_images_count} 张图片</>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge
-                      variant={
-                        doc.status === "completed"
-                          ? "default"
-                          : doc.status === "failed"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                    >
-                      {doc.status === "completed"
-                        ? "已完成"
-                        : doc.status === "failed"
-                        ? "失败"
-                        : "处理中"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Uploaded Images */}
         {images.length > 0 && (
           <Card>
@@ -324,7 +269,7 @@ export default function ProjectDetail() {
                       <div className="text-white text-xs text-center px-2">
                         <p className="font-medium truncate">{image.filename}</p>
                         <p className="text-white/70">
-                          {(image.file_size / 1024).toFixed(1)} KB
+                          {image.file_size ? `${(image.file_size / 1024).toFixed(1)} KB` : "—"}
                         </p>
                       </div>
                     </div>
