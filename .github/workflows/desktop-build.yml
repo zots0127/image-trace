@@ -69,18 +69,31 @@ jobs:
         run: |
           chmod +x node_modules/app-builder-bin/linux/x64/app-builder || true
 
-      - name: Build desktop app
+      - name: Build desktop app (PyInstaller)
         working-directory: desktop
         run: |
-          npm run dist
+          # clean previous outputs
+          rm -rf backend_bin dist
+          npm run dist:pyinstaller
+          # copy artifacts to flavor folder
+          node -e "const fs=require('fs');fs.rmSync('dist-pyinstaller',{recursive:true,force:true});fs.rmSync('backend_bin_py',{recursive:true,force:true});fs.cpSync('dist','dist-pyinstaller',{recursive:true});fs.cpSync('backend_bin','backend_bin_py',{recursive:true});"
+
+      - name: Build desktop app (Nuitka)
+        working-directory: desktop
+        run: |
+          rm -rf backend_bin dist
+          npm run dist:nuitka
+          node -e "const fs=require('fs');fs.rmSync('dist-nuitka',{recursive:true,force:true});fs.rmSync('backend_bin_nuitka',{recursive:true,force:true});fs.cpSync('dist','dist-nuitka',{recursive:true});fs.cpSync('backend_bin','backend_bin_nuitka',{recursive:true});"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: image-trace-desktop-${{ runner.os }}
           path: |
-            desktop/dist/**
-            desktop/backend_bin/**
+            desktop/dist-pyinstaller/**
+            desktop/dist-nuitka/**
+            desktop/backend_bin_py/**
+            desktop/backend_bin_nuitka/**
 
   release:
     name: Release
@@ -99,13 +112,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/**/*.dmg
-            artifacts/**/*.zip
-            artifacts/**/*.exe
-            artifacts/**/*.msi
-            artifacts/**/*.AppImage
-            artifacts/**/*.deb
-            artifacts/**/*.rpm
-            artifacts/**/*latest*.yml
-            artifacts/**/*.blockmap
-            artifacts/backend_bin/**
+            artifacts/**/dist-pyinstaller/**/*.dmg
+            artifacts/**/dist-pyinstaller/**/*.zip
+            artifacts/**/dist-pyinstaller/**/*.exe
+            artifacts/**/dist-pyinstaller/**/*.msi
+            artifacts/**/dist-pyinstaller/**/*.AppImage
+            artifacts/**/dist-pyinstaller/**/*.deb
+            artifacts/**/dist-pyinstaller/**/*.rpm
+            artifacts/**/dist-pyinstaller/**/*latest*.yml
+            artifacts/**/dist-pyinstaller/**/*.blockmap
+            artifacts/**/dist-nuitka/**/*.dmg
+            artifacts/**/dist-nuitka/**/*.zip
+            artifacts/**/dist-nuitka/**/*.exe
+            artifacts/**/dist-nuitka/**/*.msi
+            artifacts/**/dist-nuitka/**/*.AppImage
+            artifacts/**/dist-nuitka/**/*.deb
+            artifacts/**/dist-nuitka/**/*.rpm
+            artifacts/**/dist-nuitka/**/*latest*.yml
+            artifacts/**/dist-nuitka/**/*.blockmap
+            artifacts/**/backend_bin_py/**
+            artifacts/**/backend_bin_nuitka/**
