@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -50,7 +50,7 @@ export default function ProjectDetail() {
   const [analyzing, setAnalyzing] = useState(false);
   const locale = i18n.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 
-  const loadProject = async () => {
+  const loadProject = useCallback(async () => {
     if (!projectId) return;
 
     setLoading(true);
@@ -87,9 +87,9 @@ export default function ProjectDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId, t, toast]);
 
-  const prefetchResult = async () => {
+  const prefetchResult = useCallback(async () => {
     if (!projectId) return;
     setPrefetching(true);
     try {
@@ -100,9 +100,9 @@ export default function ProjectDetail() {
     } finally {
       setPrefetching(false);
     }
-  };
+  }, [projectId]);
 
-  const loadRuns = async () => {
+  const loadRuns = useCallback(async () => {
     if (!projectId) return;
     setLoadingRuns(true);
     try {
@@ -113,13 +113,13 @@ export default function ProjectDetail() {
     } finally {
       setLoadingRuns(false);
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
     loadProject();
     prefetchResult();
     loadRuns();
-  }, [projectId]);
+  }, [loadProject, prefetchResult, loadRuns]);
 
   const handleImagesUploaded = (uploadedImages: Image[]) => {
     setImages((prev) => [...prev, ...uploadedImages]);

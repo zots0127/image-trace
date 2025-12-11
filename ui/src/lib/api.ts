@@ -3,7 +3,16 @@ import { APIError } from "./errorHandler";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-export type HashType = "orb" | "brisk" | "sift";
+export type HashType =
+  | "orb"
+  | "brisk"
+  | "sift"
+  | "phash"
+  | "dhash"
+  | "ahash"
+  | "whash"
+  | "surf"
+  | "hybrid";
 
 function getJsonHeaders(): HeadersInit {
   return { "Content-Type": "application/json" };
@@ -184,6 +193,8 @@ export const deleteProject = async (projectId: string): Promise<void> => {
 };
 
 // Images - Upload batch
+type ProcessedImage = { id: number; filename: string; file_path?: string };
+
 export const uploadImages = async (projectId: string, files: File[]): Promise<Image[]> => {
   const endpoint = `${API_BASE_URL}/upload`;
   const results: Image[] = [];
@@ -211,7 +222,7 @@ export const uploadImages = async (projectId: string, files: File[]): Promise<Im
     const data = await response.json();
     // data.processed_images 中只有 id/filename/file_path
     if (Array.isArray(data.processed_images)) {
-      data.processed_images.forEach((img: any) => {
+      (data.processed_images as ProcessedImage[]).forEach((img) => {
         results.push({
           id: img.id,
           filename: img.filename,
@@ -277,9 +288,9 @@ export const extractDocument = async (projectId: string, filePath: string): Prom
     project_id: Number(projectId),
     extracted_images_count: Array.isArray(data.images) ? data.images.length : 0,
     images: Array.isArray(data.images)
-      ? data.images.map((img: any) => ({
+      ? (data.images as ProcessedImage[]).map((img) => ({
           ...img,
-          public_url: toStaticUrl(img.file_path),
+          public_url: toStaticUrl(img.file_path || ""),
         }))
       : [],
     error: data.error,
@@ -426,7 +437,7 @@ export const getAnalysisResult = async (
 
 // Legacy function for backward compatibility
 export const getAnalysisResults = async (projectId: string): Promise<AnalysisResult[]> => {
-  const r = await analyzeImages(projectId as any, "phash");
+  const r = await analyzeImages(projectId, "phash");
   return [r];
 };
 

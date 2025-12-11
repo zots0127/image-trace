@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { getProjects, deleteProject, type Project } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
@@ -19,7 +19,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { t } = useTranslation();
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     setLoading(true);
     try {
       console.log("开始加载项目列表...");
@@ -53,11 +53,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast, t]);
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [loadProjects]);
 
   useEffect(() => {
     const hasCompletedOnboarding = localStorage.getItem("onboarding-completed");

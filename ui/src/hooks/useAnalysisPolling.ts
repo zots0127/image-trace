@@ -59,7 +59,7 @@ export function useAnalysisPolling({
         clearInterval(intervalRef.current);
       }
     };
-  }, [analysisId, interval, onComplete, onError]);
+  }, [analysisId, interval, onComplete, onError, hashType, threshold]);
 
   return { result, isPolling };
 }

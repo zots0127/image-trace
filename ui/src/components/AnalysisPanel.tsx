@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Zap, Cpu, Layers, Play } from "lucide-react";
+import { Zap, Cpu, Layers, Play, type LucideIcon } from "lucide-react";
 import { HashType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -14,7 +14,7 @@ interface AnalysisPanelProps {
   onAnalyze: (hashType: HashType) => void;
 }
 
-const algorithms: { value: HashType; label: string; description: string; icon: any }[] = [
+const algorithms: { value: HashType; label: string; description: string; icon: LucideIcon }[] = [
   {
     value: "orb",
     label: "ORB 局部特征",
@@ -49,7 +49,7 @@ export function AnalysisPanel({ projectId, hasImages, onAnalyze, loading }: Anal
         <CardDescription>选择分析算法并开始处理</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <RadioGroup value={algorithm} onValueChange={(v) => setAlgorithm(v as any)}>
+        <RadioGroup value={algorithm} onValueChange={(v) => setAlgorithm(v as HashType)}>
           <div className="space-y-3">
             {algorithms.map((algo) => {
               const Icon = algo.icon;
@@ -62,7 +62,7 @@ export function AnalysisPanel({ projectId, hasImages, onAnalyze, loading }: Anal
                       ? "border-primary bg-primary/5"
                       : "border-border hover:border-primary/30"
                   )}
-                  onClick={() => setAlgorithm(algo.value as any)}
+                  onClick={() => setAlgorithm(algo.value)}
                 >
                   <RadioGroupItem value={algo.value} id={algo.value} className="mt-1" />
                   <div className="flex-1">

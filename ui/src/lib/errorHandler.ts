@@ -4,16 +4,16 @@ export interface DetailedError {
   endpoint?: string;
   timestamp: string;
   stack?: string;
-  response?: any;
+  response?: unknown;
 }
 
 export class APIError extends Error {
   statusCode?: number;
   endpoint?: string;
   timestamp: string;
-  response?: any;
+  response?: unknown;
 
-  constructor(message: string, statusCode?: number, endpoint?: string, response?: any) {
+  constructor(message: string, statusCode?: number, endpoint?: string, response?: unknown) {
     super(message);
     this.name = "APIError";
     this.statusCode = statusCode;

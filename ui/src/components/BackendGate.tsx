@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, ReactNode } from "react";
+import { useEffect, useRef, useState, ReactNode, useCallback } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { checkHealth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ export function BackendGate({ children }: BackendGateProps) {
     }
   };
 
-  const probe = async (delayMs = 800) => {
+  const probe = useCallback(async (delayMs = 800) => {
     clearTimer();
     setStatus("checking");
     try {
@@ -33,7 +33,7 @@ export function BackendGate({ children }: BackendGateProps) {
       const nextDelay = Math.min(delayMs + 400, 4000);
       timerRef.current = setTimeout(() => probe(nextDelay), nextDelay);
     }
-  };
+  }, []);
 
   useEffect(() => {
     probe();
@@ -45,7 +45,7 @@ export function BackendGate({ children }: BackendGateProps) {
         retryDelayRef.current = undefined;
       }
     };
-  }, []);
+  }, [probe]);
 
   if (status === "ready") {
     return <>{children}</>;
