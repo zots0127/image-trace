@@ -1,6 +1,18 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
+const STORAGE_KEY = "image-trace-lang";
+
+const detectInitialLng = () => {
+  if (typeof window === "undefined") return "zh";
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) return saved;
+  const nav = navigator.language || "";
+  if (nav.toLowerCase().startsWith("en")) return "en";
+  if (nav.toLowerCase().startsWith("zh")) return "zh";
+  return "zh";
+};
+
 const resources = {
   en: {
     translation: {
@@ -21,6 +33,7 @@ const resources = {
         offlineMode: "Offline mode: usable without account",
         onlineTip: "Sign in or register to start",
         dashboard: "Dashboard",
+        demo: "Demo",
       },
       toast: {
         signInSuccess: "Signed in successfully",
@@ -52,6 +65,7 @@ const resources = {
         offlineMode: "离线模式：无需账号可本地使用",
         onlineTip: "登录或注册以开始使用",
         dashboard: "控制台",
+        demo: "在线演示",
       },
       toast: {
         signInSuccess: "登录成功",
@@ -67,14 +81,25 @@ const resources = {
 };
 
 const fallbackLng = "zh";
+const initialLng = detectInitialLng();
 
 i18n.use(initReactI18next).init({
   resources,
-  lng: fallbackLng,
+  lng: initialLng,
   fallbackLng,
   interpolation: {
     escapeValue: false,
   },
 });
+
+if (typeof window !== "undefined") {
+  i18n.on("languageChanged", (lng) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, lng);
+    } catch {
+      // ignore storage errors
+    }
+  });
+}
 
 export default i18n;

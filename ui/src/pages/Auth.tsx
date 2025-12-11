@@ -103,7 +103,7 @@ export default function Auth() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">图像溯源分析系统</CardTitle>
+          <CardTitle className="text-2xl">{t("common.appName")}</CardTitle>
           <CardDescription>
             {offline ? t("common.offlineMode") : t("common.onlineTip")}
           </CardDescription>

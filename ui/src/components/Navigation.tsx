@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Menu, X, Image as ImageIcon, LogOut, LayoutDashboard } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 
 export function Navigation() {
   const navigate = useNavigate();
@@ -11,14 +12,19 @@ export function Navigation() {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { t, i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/dashboard");
   };
 
-  const isLandingPage = location.pathname === "/landing"; // still used if user manually enters
   const isDashboard = location.pathname === "/dashboard" || location.pathname.startsWith("/project/");
+
+  const toggleLanguage = () => {
+    const next = i18n.language === "zh" ? "en" : "zh";
+    i18n.changeLanguage(next);
+  };
 
   return (
     <nav className="sticky top-0 z-50 backdrop-blur-lg bg-background/80 border-b border-border">
@@ -51,7 +57,7 @@ export function Navigation() {
                 location.pathname === "/demo" ? "text-primary" : "text-muted-foreground"
               }`}
             >
-              Demo
+              {t("common.demo")}
             </button>
           </div>
 
@@ -89,7 +95,7 @@ export function Navigation() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => i18n.changeLanguage(i18n.language === "zh" ? "en" : "zh")}
+              onClick={toggleLanguage}
             >
               {i18n.language === "zh" ? "EN" : "中文"}
             </Button>
@@ -116,7 +122,7 @@ export function Navigation() {
                 onClick={() => { navigate("/demo"); setMobileMenuOpen(false); }}
                 className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
               >
-                Demo
+                {t("common.demo")}
               </button>
               <button 
                 onClick={() => { navigate("/dashboard"); setMobileMenuOpen(false); }}
@@ -146,7 +152,7 @@ export function Navigation() {
                 variant="ghost"
                 size="sm"
                 className="mx-4 mt-2"
-                onClick={() => { i18n.changeLanguage(i18n.language === "zh" ? "en" : "zh"); setMobileMenuOpen(false); }}
+                onClick={() => { toggleLanguage(); setMobileMenuOpen(false); }}
               >
                 {i18n.language === "zh" ? "EN" : "中文"}
               </Button>
