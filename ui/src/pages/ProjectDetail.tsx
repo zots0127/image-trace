@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   getProject,
   getProjectImages,
@@ -32,6 +33,7 @@ export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { t, i18n } = useTranslation();
 
   const [project, setProject] = useState<Project | null>(null);
   const [images, setImages] = useState<Image[]>([]);
@@ -46,6 +48,7 @@ export default function ProjectDetail() {
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const locale = i18n.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 
   const loadProject = async () => {
     if (!projectId) return;
@@ -61,7 +64,7 @@ export default function ProjectDetail() {
     } catch (error) {
       const err = error as APIError;
       toast({
-        title: "加载失败",
+        title: t("project.loadFailed"),
         description: err.message,
         variant: "destructive",
         action: (
@@ -72,12 +75,12 @@ export default function ProjectDetail() {
             onClick={async () => {
               const success = await copyErrorToClipboard(err);
               if (success) {
-                toast({ title: "已复制错误详情" });
+                toast({ title: t("project.copyDetail") });
               }
             }}
           >
             <Copy className="h-3 w-3 mr-1" />
-            复制
+            {t("common.copy")}
           </Button>
         ),
       });
@@ -150,11 +153,11 @@ export default function ProjectDetail() {
       setLastAlgo(algo);
       const res = await analyzeImages(projectId, algo);
       setCompareResult(res);
-      toast({ title: "分析完成", description: `共 ${res.total_images} 张图片，分组 ${res.groups.length}` });
+      toast({ title: t("project.analyzeSuccess"), description: t("project.analyzeSuccessDesc", { total: res.total_images, groups: res.groups.length }) });
     } catch (error) {
       const err = error as APIError;
       toast({
-        title: "分析失败",
+        title: t("project.analyzeFailed"),
         description: err.message,
         variant: "destructive",
         action: (
@@ -165,12 +168,12 @@ export default function ProjectDetail() {
             onClick={async () => {
               const success = await copyErrorToClipboard(err);
               if (success) {
-                toast({ title: "已复制错误详情" });
+                toast({ title: t("project.copyDetail") });
               }
             }}
           >
             <Copy className="h-3 w-3 mr-1" />
-            复制
+            {t("common.copy")}
           </Button>
         ),
       });
@@ -214,10 +217,10 @@ export default function ProjectDetail() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">项目未找到</h2>
+          <h2 className="text-2xl font-bold mb-4">{t("project.notFound")}</h2>
           <Button onClick={() => navigate("/")}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            返回首页
+            {t("project.backHome")}
           </Button>
         </div>
       </div>
@@ -236,7 +239,7 @@ export default function ProjectDetail() {
               onClick={() => navigate("/")}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              返回
+              {t("project.back")}
             </Button>
             <div>
               <h1 className="text-3xl font-bold">{project.name}</h1>
@@ -251,7 +254,7 @@ export default function ProjectDetail() {
             onClick={loadProject}
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            刷新
+            {t("project.refresh")}
           </Button>
         </div>
 
@@ -261,25 +264,25 @@ export default function ProjectDetail() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>历史分析</CardTitle>
+                <CardTitle>{t("project.history")}</CardTitle>
                 {loadingRuns && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
               </div>
-              <CardDescription>按时间倒序，点击可查看对应结果</CardDescription>
+              <CardDescription>{t("project.historyDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                 {runs.map((r) => (
                   <div key={r.id} className="rounded border p-3 space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">#{r.id}</span>
+                      <span className="text-sm font-medium">{t("project.runId", { id: r.id })}</span>
                       <Badge variant="secondary">{r.hash_type}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {new Date(r.created_at).toLocaleString("zh-CN")}
+                      {new Date(r.created_at).toLocaleString(locale)}
                     </div>
                     <div className="text-xs text-muted-foreground flex gap-3">
-                      <span>组 {r.groups_count}</span>
-                      <span>未分组 {r.unique_count}</span>
+                      <span>{t("project.groupsCount", { count: r.groups_count })}</span>
+                      <span>{t("project.uniqueCount", { count: r.unique_count })}</span>
                     </div>
                     <Button
                       size="sm"
@@ -291,17 +294,17 @@ export default function ProjectDetail() {
                           if (result) {
                             setCompareResult(result);
                             setLastAlgo(r.hash_type);
-                            toast({ title: "已加载历史结果", description: `运行 #${r.id}` });
+                            toast({ title: t("project.runLoaded"), description: t("project.runId", { id: r.id }) });
                           } else {
-                            toast({ title: "无结果数据", description: `运行 #${r.id} 未保存详细结果`, variant: "destructive" });
+                            toast({ title: t("project.runNoResult"), description: t("project.runId", { id: r.id }), variant: "destructive" });
                           }
                         } catch (error) {
                           const err = error as APIError;
-                          toast({ title: "加载失败", description: err.message, variant: "destructive" });
+                          toast({ title: t("project.loadFailed"), description: err.message, variant: "destructive" });
                         }
                       }}
                     >
-                      查看结果
+                      {t("project.viewResult")}
                     </Button>
                   </div>
                 ))}
@@ -313,18 +316,18 @@ export default function ProjectDetail() {
         {/* Upload Section */}
         <Card>
           <CardHeader>
-            <CardTitle>上传文件</CardTitle>
+            <CardTitle>{t("project.uploadSection")}</CardTitle>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="images" className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="images">
                   <ImageIcon className="h-4 w-4 mr-2" />
-                  直接上传图片
+                  {t("project.uploadImagesTab")}
                 </TabsTrigger>
                 <TabsTrigger value="documents">
                   <FileText className="h-4 w-4 mr-2" />
-                  上传文档提取图片
+                  {t("project.uploadDocsTab")}
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="images" className="mt-4">
@@ -348,8 +351,8 @@ export default function ProjectDetail() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>已上传图片</CardTitle>
-                <Badge variant="secondary">{images.length} 张</Badge>
+                <CardTitle>{t("project.uploadedTitle")}</CardTitle>
+                <Badge variant="secondary">{t("project.uploadedCount", { count: images.length })}</Badge>
               </div>
             </CardHeader>
             <CardContent>
@@ -393,7 +396,7 @@ export default function ProjectDetail() {
         {(analyzing || prefetching) && (
           <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            {analyzing ? "正在分析图片，请稍候…" : "正在加载最新分析结果…"}
+            {analyzing ? t("project.analyzing") : t("project.prefetching")}
           </div>
         )}
 
@@ -402,18 +405,18 @@ export default function ProjectDetail() {
           <Card>
             <CardHeader>
               <CardTitle>
-                相似分组（{compareResult.groups.length} 组，未分组 {compareResult.unique_images.length} 张）
+                {t("project.compareTitle", { groups: compareResult.groups.length, unique: compareResult.unique_images.length })}
               </CardTitle>
-              <CardDescription>共 {compareResult.total_images} 张图片</CardDescription>
+              <CardDescription>{t("project.compareDesc", { total: compareResult.total_images })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground flex flex-wrap gap-4">
-                <span>总图片：{compareResult.total_images}</span>
-                <span>分组：{compareResult.groups.length}</span>
-                <span>未分组：{compareResult.unique_images.length}</span>
-                <span>算法：{lastAlgo}</span>
+                <span>{t("project.statsTotal", { count: compareResult.total_images })}</span>
+                <span>{t("project.statsGroups", { count: compareResult.groups.length })}</span>
+                <span>{t("project.statsUnique", { count: compareResult.unique_images.length })}</span>
+                <span>{t("project.statsAlgo", { algo: lastAlgo })}</span>
                 <span className="flex items-center gap-2">
-                  连线算法：
+                  {t("project.statsMatchAlgo")}
                   <select
                     className="border rounded px-2 py-1 text-sm bg-background"
                     value={matchAlgo}
@@ -427,7 +430,7 @@ export default function ProjectDetail() {
               </div>
               <div className="flex justify-end">
                 <Button variant="ghost" size="sm" onClick={() => setShowAdvanced((v) => !v)}>
-                  {showAdvanced ? "隐藏高级视图" : "显示高级视图"}
+                  {showAdvanced ? t("project.toggleAdvancedHide") : t("project.toggleAdvancedShow")}
                 </Button>
               </div>
               {showAdvanced && (
@@ -440,8 +443,8 @@ export default function ProjectDetail() {
                 {compareResult.groups.map((g) => (
                   <div key={g.group_id} className="p-3 rounded border">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm font-medium">组 {g.group_id}</div>
-                      <Badge variant="secondary">平均相似度 {Math.round(g.similarity_score * 100)}%</Badge>
+                      <div className="text-sm font-medium">{t("project.groupLabel", { id: g.group_id })}</div>
+                      <Badge variant="secondary">{t("project.avgSimilarity", { percent: Math.round(g.similarity_score * 100) })}</Badge>
                       {g.images.length >= 2 && (
                         <Button
                           variant="outline"
@@ -456,7 +459,7 @@ export default function ProjectDetail() {
                             } catch (error) {
                               const err = error as APIError;
                               toast({
-                                title: "生成特征连线失败",
+                                title: t("project.generateMatchFailed"),
                                 description: err.message,
                                 variant: "destructive",
                               });
@@ -465,7 +468,7 @@ export default function ProjectDetail() {
                             }
                           }}
                         >
-                          {matchLoadingGroup === g.group_id ? "生成中..." : "查看特征连线"}
+                          {matchLoadingGroup === g.group_id ? t("project.generating") : t("project.viewMatches")}
                         </Button>
                       )}
                     </div>
@@ -484,7 +487,7 @@ export default function ProjectDetail() {
                 ))}
                 {compareResult.unique_images.length > 0 && (
                   <div className="p-3 rounded border">
-                    <div className="text-sm font-medium mb-2">未分组</div>
+                    <div className="text-sm font-medium mb-2">{t("project.ungrouped")}</div>
                     <div className="flex gap-2 flex-wrap">
                       {compareResult.unique_images.map((img) => (
                         <div key={img.id} className="w-24 h-24 overflow-hidden rounded border">
@@ -507,9 +510,9 @@ export default function ProjectDetail() {
           <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center px-4">
             <div className="bg-background rounded-lg shadow-lg max-w-5xl w-full overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b">
-                <div className="text-sm font-medium">特征点连线</div>
+                <div className="text-sm font-medium">{t("project.matchModal")}</div>
                 <Button variant="ghost" size="sm" onClick={() => setMatchImage(null)}>
-                  关闭
+                  {t("project.close")}
                 </Button>
               </div>
               <div className="p-4 max-h-[80vh] overflow-auto bg-black">
