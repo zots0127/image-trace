@@ -267,7 +267,7 @@ def compare_images_in_project(
         for img in image_dicts:
             try:
                 fp = STATIC_DIR / img['file_path']
-            desc, norm = get_cached_descriptor(str(fp), img['file_hash'], hash_type)
+                desc, norm = get_cached_descriptor(str(fp), img['file_hash'], hash_type)
                 img['descriptor'] = desc
                 img['descriptor_norm'] = norm
             except Exception:
