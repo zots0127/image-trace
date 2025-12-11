@@ -13,7 +13,7 @@
 - **后端**: FastAPI + SQLite
 - **存储**: 本地文件系统
 - **图像处理**: PIL + imagehash
-- **部署**: 单容器（可选Docker）
+- **部署**: Electron 桌面应用（内置后端，无需 Docker）
 
 ## 快速开始
 
@@ -36,11 +36,12 @@ uvicorn app.main:app --reload
 
 访问 http://localhost:8000 查看API文档
 
-### 方法2: 使用Docker
+### 方法2: 桌面应用（内置后端，无需 Docker）
 
 ```bash
-# 使用简化版docker-compose
-docker compose -f docker-compose.simplified.yml up
+cd desktop
+npm install
+npm run dev
 ```
 
 ## API接口
@@ -84,7 +85,7 @@ docker compose -f docker-compose.simplified.yml up
         {
           "id": 1,
           "filename": "image1.jpg",
-          "file_path": "data/uploads/image1.jpg",
+          "file_path": "uploads/image1.jpg",
           "phash": "...",
           "similarity_type": "exact_match"
         }
@@ -164,13 +165,19 @@ backend_simplified/
 │   ├── document_parser.py   # 文档解析
 │   └── utils.py             # 工具函数
 ├── requirements.txt
-├── Dockerfile
+├── run_server.py            # 桌面端打包入口（PyInstaller）
 └── ...
 
 data/                      # 数据存储
 ├── uploads/              # 上传文件
 ├── extracted/            # 提取的图片
 └── database.db          # SQLite数据库
+
+desktop/                   # Electron 桌面端
+├── main.js
+├── preload.js
+├── renderer/
+└── scripts/build-backend.cjs   # PyInstaller 构建脚本（构建机使用）
 ```
 
 ## 与原版对比
