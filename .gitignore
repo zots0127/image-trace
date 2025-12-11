@@ -158,3 +158,8 @@ development/
 # Test files
 test_results/
 test_uploads/
+
+# Electron desktop build artifacts
+desktop/backend_bin/
+desktop/.pyinstaller-build/
+desktop/.pyinstaller-spec/

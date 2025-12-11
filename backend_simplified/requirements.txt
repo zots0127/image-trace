@@ -1,0 +1,15 @@
+# 核心框架
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+sqlmodel==0.0.14
+python-multipart==0.0.9
+
+# 图像处理
+Pillow==10.2.0
+imagehash==4.3.1
+
+# PDF处理
+PyMuPDF==1.23.18
+
+# 数据库
+# sqlite3 为 Python 内置模块，无需安装（也无法通过 pip 安装）

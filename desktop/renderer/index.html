@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' http: https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src http: https:;" />
+  <title>Image Trace（桌面版）</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div>
+        <div class="title">Image Trace <span class="badge">桌面版</span></div>
+        <div class="subtitle">简化版：项目管理 / 上传图片或文档 / 相似分组</div>
+      </div>
+
+      <div class="toolbar">
+        <div class="field">
+          <label>API 地址</label>
+          <input id="apiBaseUrl" type="text" placeholder="http://localhost:8000" />
+        </div>
+
+        <div class="btnRow">
+          <button id="btnHealth" class="btn">检测后端</button>
+          <button id="btnStart" class="btn primary">启动后端（内置）</button>
+          <button id="btnStop" class="btn danger">停止后端</button>
+          <button id="btnOpenData" class="btn">打开数据目录</button>
+        </div>
+
+        <div class="statusLine">
+          <span id="healthDot" class="dot"></span>
+          <span id="healthText">未检测</span>
+          <span class="sep">·</span>
+          <span id="runtimeText" class="muted"></span>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">项目</div>
+          <div class="cardActions">
+            <button id="btnReloadProjects" class="btn">刷新</button>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div>
+            <div class="field">
+              <label>当前项目</label>
+              <select id="projectSelect"></select>
+            </div>
+            <div id="projectsList" class="list"></div>
+          </div>
+
+          <div>
+            <div class="field">
+              <label>创建项目</label>
+              <input id="newProjectName" type="text" placeholder="例如：客户 A - 2025Q4" />
+            </div>
+            <div class="field">
+              <label>描述（可选）</label>
+              <input id="newProjectDesc" type="text" placeholder="备注" />
+            </div>
+            <button id="btnCreateProject" class="btn primary">创建</button>
+            <div id="projectMsg" class="msg"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">上传（图片 / 文档）</div>
+          <div class="cardActions">
+            <span class="muted">后端接口：POST /upload（单文件），这里会自动逐个上传</span>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div>
+            <div class="field">
+              <label>选择文件（可多选）</label>
+              <input id="fileInput" type="file" multiple accept="image/*,.pdf,.docx,.pptx" />
+            </div>
+            <button id="btnUpload" class="btn primary">开始上传</button>
+            <div id="uploadMsg" class="msg"></div>
+          </div>
+
+          <div>
+            <div class="field">
+              <label>上传日志</label>
+              <div id="uploadLog" class="log"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">图片</div>
+          <div class="cardActions">
+            <button id="btnReloadImages" class="btn">刷新</button>
+          </div>
+        </div>
+
+        <div id="imagesGrid" class="images"></div>
+      </section>
+
+      <section class="card">
+        <div class="cardHeader">
+          <div class="cardTitle">相似分组</div>
+          <div class="cardActions">
+            <span class="muted">后端接口：POST /compare/{project_id}</span>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div>
+            <div class="field">
+              <label>阈值（0-1）</label>
+              <input id="threshold" type="number" min="0" max="1" step="0.01" value="0.85" />
+            </div>
+            <div class="field">
+              <label>哈希类型</label>
+              <select id="hashType">
+                <option value="phash" selected>phash（推荐）</option>
+                <option value="dhash">dhash</option>
+                <option value="ahash">ahash</option>
+                <option value="whash">whash</option>
+              </select>
+            </div>
+            <button id="btnCompare" class="btn primary">开始分组</button>
+            <div id="compareMsg" class="msg"></div>
+          </div>
+
+          <div>
+            <div class="field">
+              <label>结果</label>
+              <div id="compareResult" class="result"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="muted">提示：图片预览走后端静态服务 <code>/static</code>，文件路径来自后端返回的 <code>file_path</code>（相对于 data 目录）。</div>
+    </footer>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
