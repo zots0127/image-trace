@@ -4,14 +4,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Menu, X, Image as ImageIcon, LogOut, LayoutDashboard } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useTranslation } from "react-i18next";
 
 export function Navigation() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { t, i18n } = useTranslation();
   const { t, i18n } = useTranslation();
 
   const handleSignOut = async () => {
