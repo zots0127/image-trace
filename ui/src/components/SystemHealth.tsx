@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Activity, RefreshCw, Server, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
-import { checkHealth } from "@/lib/api";
+import { checkHealth, API_BASE_URL } from "@/lib/api";
 
 interface SystemHealthProps {
   autoRefresh?: boolean;
@@ -107,7 +107,9 @@ export function SystemHealth({ autoRefresh = true, refreshInterval = 30000 }: Sy
         <div className="text-xs text-muted-foreground border-t pt-2">
           <div className="flex items-center justify-between">
             <span>API地址</span>
-            <span className="font-mono">duptest.0.af</span>
+            <span className="font-mono">
+              {API_BASE_URL.replace(/\/$/, "")}
+            </span>
           </div>
         </div>
       </CardContent>

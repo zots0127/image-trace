@@ -3,43 +3,40 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Zap, Cpu, Layers, Play, Copy } from "lucide-react";
-import { analyzeImages } from "@/lib/api";
-import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
-import { useToast } from "@/hooks/use-toast";
+import { Zap, Cpu, Layers, Play } from "lucide-react";
+import { HashType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface AnalysisPanelProps {
   projectId: string;
   hasImages: boolean;
   loading?: boolean;
-  onAnalyze: (algo: "fast" | "orb" | "hybrid") => void;
+  onAnalyze: (hashType: HashType) => void;
 }
 
-const algorithms = [
-  {
-    value: "fast",
-    label: "快速特征分析",
-    description: "平均颜色 + 感知哈希，速度最快",
-    icon: Zap,
-  },
+const algorithms: { value: HashType; label: string; description: string; icon: any }[] = [
   {
     value: "orb",
-    label: "ORB局部特征",
-    description: "检测关键点和描述符，精度较高",
+    label: "ORB 局部特征",
+    description: "关键点+描述子匹配，精度高但计算更慢",
     icon: Cpu,
   },
   {
-    value: "hybrid",
-    label: "混合模式",
-    description: "结合多种特征，最准确",
+    value: "brisk",
+    label: "BRISK 二进制特征",
+    description: "二进制描述子，速度快，抗旋转",
+    icon: Zap,
+  },
+  {
+    value: "sift",
+    label: "SIFT 关键点",
+    description: "尺度不变特征，更稳健（计算更慢）",
     icon: Layers,
   },
 ];
 
 export function AnalysisPanel({ projectId, hasImages, onAnalyze, loading }: AnalysisPanelProps) {
-  const [algorithm, setAlgorithm] = useState<"fast" | "orb" | "hybrid">("fast");
-  const { toast } = useToast();
+  const [algorithm, setAlgorithm] = useState<HashType>("orb");
 
   const handleAnalyze = async () => {
     onAnalyze(algorithm);

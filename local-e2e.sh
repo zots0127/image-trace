@@ -48,7 +48,9 @@ cleanup() {
   info "清理后台进程..."
   [[ -n "${ELECTRON_PID}" ]] && kill "${ELECTRON_PID}" 2>/dev/null || true
   [[ -n "${BACKEND_PID}" ]] && kill "${BACKEND_PID}" 2>/dev/null || true
+  wait ${ELECTRON_PID:-} ${BACKEND_PID:-} 2>/dev/null || true
 }
+trap "cleanup; exit 0" INT TERM
 trap cleanup EXIT
 
 info "启动内置后端 (127.0.0.1:8000)"

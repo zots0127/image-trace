@@ -24,6 +24,7 @@ export function DocumentUploadZone({ projectId, onDocumentUploaded }: DocumentUp
 
       const file = acceptedFiles[0];
       setUploading(true);
+      setProcessing(true);
       
       try {
         const document = await uploadDocument(projectId, file);
@@ -60,7 +61,7 @@ export function DocumentUploadZone({ projectId, onDocumentUploaded }: DocumentUp
           ),
         });
         setUploading(false);
-        setProcessing(null);
+        setProcessing(false);
       }
     },
     [projectId, onDocumentUploaded, toast]

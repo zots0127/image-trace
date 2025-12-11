@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import Column, TEXT
 
 
 class ProjectBase(SQLModel):
@@ -75,3 +76,18 @@ class ComparisonResult(SQLModel):
     total_images: int
     groups: List[SimilarGroup]
     unique_images: List[ImageRead]  # 未找到相似图的独立图片
+
+
+class AnalysisRun(SQLModel, table=True):
+    """分析运行记录"""
+    __tablename__ = "analysis_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="projects.id")
+    hash_type: str = Field(max_length=32)
+    threshold: float = Field(default=0.85)
+    total_images: int
+    groups_count: int
+    unique_count: int
+    summary: Optional[str] = Field(default=None, sa_column=Column(TEXT))
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)

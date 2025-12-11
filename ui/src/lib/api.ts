@@ -3,6 +3,8 @@ import { APIError } from "./errorHandler";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
+export type HashType = "orb" | "brisk" | "sift";
+
 function getJsonHeaders(): HeadersInit {
   return { "Content-Type": "application/json" };
 }
@@ -50,6 +52,21 @@ function toStaticUrl(filePath: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}/static/${sanitized}`;
 }
 
+function withPublicUrl(img: Image): Image {
+  return { ...img, public_url: toStaticUrl(img.file_path) };
+}
+
+function attachPublicUrlToAnalysis(result: AnalysisResult): AnalysisResult {
+  return {
+    ...result,
+    groups: (result.groups || []).map((g) => ({
+      ...g,
+      images: (g.images || []).map(withPublicUrl),
+    })),
+    unique_images: (result.unique_images || []).map(withPublicUrl),
+  };
+}
+
 export interface Document {
   id: string;
   filename: string;
@@ -69,6 +86,19 @@ export interface AnalysisResult {
     images: Image[];
   }>;
   unique_images: Image[];
+  run_id?: number;
+}
+
+export interface AnalysisRun {
+  id: number;
+  project_id: number;
+  hash_type: HashType;
+  threshold: number;
+  total_images: number;
+  groups_count: number;
+  unique_count: number;
+  created_at: string;
+  summary?: string;
 }
 
 // Projects
@@ -186,6 +216,7 @@ export const uploadImages = async (projectId: string, files: File[]): Promise<Im
           id: img.id,
           filename: img.filename,
           file_path: img.file_path || img.filename,
+          public_url: toStaticUrl(img.file_path || img.filename),
           project_id: Number(projectId),
         });
       });
@@ -194,6 +225,7 @@ export const uploadImages = async (projectId: string, files: File[]): Promise<Im
         id: data.id ?? Date.now(),
         filename: data.filename,
         file_path: data.file_path,
+        public_url: toStaticUrl(data.file_path),
         project_id: Number(projectId),
       });
     }
@@ -219,6 +251,38 @@ export const uploadDocument = async (projectId: string, file: File): Promise<Doc
     project_id: Number(projectId),
     extracted_images_count: imgs.length,
     images: imgs,
+  };
+};
+
+// 文档二次提取（对应后端 /extract/{file_path}）
+export const extractDocument = async (projectId: string, filePath: string): Promise<Document> => {
+  const endpoint = `${API_BASE_URL}/extract/${encodeURIComponent(filePath)}`;
+  const fd = new FormData();
+  fd.append("project_id", projectId);
+  const response = await fetch(endpoint, { method: "POST", headers: await getAuthHeaders(), body: fd });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new APIError(
+      error.detail || "文档提取失败",
+      response.status,
+      endpoint,
+      error
+    );
+  }
+  const data = await response.json();
+  return {
+    id: `${Date.now()}`,
+    filename: filePath,
+    status: data.status === "success" ? "completed" : "failed",
+    project_id: Number(projectId),
+    extracted_images_count: Array.isArray(data.images) ? data.images.length : 0,
+    images: Array.isArray(data.images)
+      ? data.images.map((img: any) => ({
+          ...img,
+          public_url: toStaticUrl(img.file_path),
+        }))
+      : [],
+    error: data.error,
   };
 };
 
@@ -252,10 +316,7 @@ export const getProjectImages = async (projectId: string): Promise<Image[]> => {
     );
   }
   const data: Image[] = await response.json();
-  return data.map((img) => ({
-    ...img,
-    public_url: toStaticUrl(img.file_path),
-  }));
+  return data.map(withPublicUrl);
 };
 
 export const deleteImage = async (projectId: string, imageId: string): Promise<void> => {
@@ -275,9 +336,8 @@ export const deleteImage = async (projectId: string, imageId: string): Promise<v
 // Analysis
 export const analyzeImages = async (
   projectId: string,
-  algorithm: "fast" | "orb" | "hybrid" = "fast",
-  threshold = 0.85,
-  hashType = "phash"
+  hashType: HashType = "orb",
+  threshold = 0.85
 ): Promise<AnalysisResult> => {
   const endpoint = `${API_BASE_URL}/compare/${projectId}`;
   const fd = new FormData();
@@ -298,23 +358,75 @@ export const analyzeImages = async (
       error
     );
   }
-  return response.json();
+  const data: AnalysisResult = await response.json();
+  return attachPublicUrlToAnalysis(data);
 };
 
-// Get analysis status
-export const getAnalysisStatus = async (analysisId: string): Promise<AnalysisResult> => {
-  // 简化后端没有异步任务，直接返回比对结果（重用 analyzeImages）
-  return analyzeImages(analysisId as any, "fast");
+// GET 版结果（对应后端 /results/{project_id}）
+export const getComparisonResults = async (
+  projectId: string,
+  hashType: HashType = "orb",
+  threshold = 0.85
+): Promise<AnalysisResult> => {
+  const endpoint = `${API_BASE_URL}/results/${projectId}?threshold=${encodeURIComponent(
+    threshold
+  )}&hash_type=${encodeURIComponent(hashType)}`;
+  const response = await fetch(endpoint, { headers: await getAuthHeaders() });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new APIError(
+      error.detail || "获取分析结果失败",
+      response.status,
+      endpoint,
+      error
+    );
+  }
+  const data: AnalysisResult = await response.json();
+  return attachPublicUrlToAnalysis(data);
 };
 
-// Get analysis results
-export const getAnalysisResult = async (analysisId: string): Promise<AnalysisResult> => {
-  return analyzeImages(analysisId as any, "fast");
+export const getAnalysisRuns = async (projectId: string): Promise<AnalysisRun[]> => {
+  const endpoint = `${API_BASE_URL}/analysis_runs?project_id=${encodeURIComponent(projectId)}`;
+  const res = await fetch(endpoint, { headers: await getAuthHeaders() });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new APIError(error.detail || "获取分析历史失败", res.status, endpoint, error);
+  }
+  return res.json();
+};
+
+export const getAnalysisRunDetail = async (runId: number): Promise<{ run: AnalysisRun; result: AnalysisResult | null }> => {
+  const endpoint = `${API_BASE_URL}/analysis_runs/${runId}`;
+  const res = await fetch(endpoint, { headers: await getAuthHeaders() });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new APIError(error.detail || "获取分析详情失败", res.status, endpoint, error);
+  }
+  const data = await res.json();
+  const parsed = data.result ? attachPublicUrlToAnalysis(data.result as AnalysisResult) : null;
+  return { run: data.run, result: parsed };
+};
+
+// Get analysis status/result（同步：直接视为完成）
+export const getAnalysisStatus = async (
+  analysisId: string,
+  hashType: HashType = "orb",
+  threshold = 0.85
+): Promise<AnalysisResult> => {
+  return getComparisonResults(analysisId, hashType, threshold);
+};
+
+export const getAnalysisResult = async (
+  analysisId: string,
+  hashType: HashType = "orb",
+  threshold = 0.85
+): Promise<AnalysisResult> => {
+  return getComparisonResults(analysisId, hashType, threshold);
 };
 
 // Legacy function for backward compatibility
 export const getAnalysisResults = async (projectId: string): Promise<AnalysisResult[]> => {
-  const r = await analyzeImages(projectId as any, "fast");
+  const r = await analyzeImages(projectId as any, "phash");
   return [r];
 };
 
@@ -322,4 +434,28 @@ export const checkHealth = async (): Promise<{ status: string }> => {
   const response = await fetch(`${API_BASE_URL}/health`);
   if (!response.ok) throw new Error("Health check failed");
   return response.json();
+};
+
+export const visualizeMatch = async (
+  imageAId: number,
+  imageBId: number,
+  hashType: HashType = "orb"
+): Promise<{ url: string }> => {
+  const endpoint = `${API_BASE_URL}/visualize_match`;
+  const fd = new FormData();
+  fd.append("image_a_id", String(imageAId));
+  fd.append("image_b_id", String(imageBId));
+  fd.append("hash_type", hashType);
+  const response = await fetch(endpoint, { method: "POST", headers: await getAuthHeaders(), body: fd });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new APIError(
+      error.detail || "生成特征匹配图失败",
+      response.status,
+      endpoint,
+      error
+    );
+  }
+  const data = await response.json();
+  return { url: toStaticUrl(data.file_path) };
 };

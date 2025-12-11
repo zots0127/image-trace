@@ -4,18 +4,25 @@ import {
   getProject,
   getProjectImages,
   analyzeImages,
+  getComparisonResults,
+  visualizeMatch,
+  getAnalysisRuns,
+  getAnalysisRunDetail,
   type Project,
   type Image,
   type AnalysisResult,
+  type HashType,
+  type AnalysisRun,
 } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
 import { ImageUploadZone } from "@/components/ImageUploadZone";
 import { DocumentUploadZone } from "@/components/DocumentUploadZone";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { SimilarityMatrix } from "@/components/SimilarityMatrix";
+import { SimilarityGraph } from "@/components/SimilarityGraph";
 import { SystemHealth } from "@/components/SystemHealth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +36,14 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [images, setImages] = useState<Image[]>([]);
   const [compareResult, setCompareResult] = useState<AnalysisResult | null>(null);
+  const [prefetching, setPrefetching] = useState(false);
+  const [matchImage, setMatchImage] = useState<string | null>(null);
+  const [matchLoadingGroup, setMatchLoadingGroup] = useState<number | null>(null);
+  const [lastAlgo, setLastAlgo] = useState<HashType>("phash");
+  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [matchAlgo, setMatchAlgo] = useState<HashType>("orb");
+  const [runs, setRuns] = useState<AnalysisRun[]>([]);
+  const [loadingRuns, setLoadingRuns] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -71,8 +86,36 @@ export default function ProjectDetail() {
     }
   };
 
+  const prefetchResult = async () => {
+    if (!projectId) return;
+    setPrefetching(true);
+    try {
+      const res = await getComparisonResults(projectId);
+      setCompareResult(res);
+    } catch {
+      // 忽略拉取失败，保持静默
+    } finally {
+      setPrefetching(false);
+    }
+  };
+
+  const loadRuns = async () => {
+    if (!projectId) return;
+    setLoadingRuns(true);
+    try {
+      const data = await getAnalysisRuns(projectId);
+      setRuns(data);
+    } catch {
+      // 静默
+    } finally {
+      setLoadingRuns(false);
+    }
+  };
+
   useEffect(() => {
     loadProject();
+    prefetchResult();
+    loadRuns();
   }, [projectId]);
 
   const handleImagesUploaded = (uploadedImages: Image[]) => {
@@ -85,19 +128,26 @@ export default function ProjectDetail() {
     loadProject();
   };
 
-  const getAlgorithmLabel = (algo: string) => {
-    const labels: Record<string, string> = {
-      fast: "快速特征",
-      orb: "ORB局部",
-      hybrid: "混合模式",
+  const getAlgorithmLabel = (algo: HashType) => {
+    const labels: Record<HashType, string> = {
+      phash: "感知哈希",
+      dhash: "差值哈希",
+      ahash: "平均哈希",
+      whash: "小波哈希",
+      orb: "ORB 局部特征",
+      brisk: "BRISK 特征",
+      sift: "SIFT 关键点",
+      surf: "SURF 关键点",
+      hybrid: "Hybrid (哈希+ORB)",
     };
     return labels[algo] || algo;
   };
 
-  const handleAnalyze = async (algo: "fast" | "orb" | "hybrid") => {
+  const handleAnalyze = async (algo: HashType) => {
     if (!projectId) return;
     setAnalyzing(true);
     try {
+      setLastAlgo(algo);
       const res = await analyzeImages(projectId, algo);
       setCompareResult(res);
       toast({ title: "分析完成", description: `共 ${res.total_images} 张图片，分组 ${res.groups.length}` });
@@ -207,6 +257,58 @@ export default function ProjectDetail() {
 
         {/* System Health */}
         <SystemHealth autoRefresh={true} refreshInterval={30000} />
+        {runs.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>历史分析</CardTitle>
+                {loadingRuns && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+              </div>
+              <CardDescription>按时间倒序，点击可查看对应结果</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {runs.map((r) => (
+                  <div key={r.id} className="rounded border p-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">#{r.id}</span>
+                      <Badge variant="secondary">{r.hash_type}</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(r.created_at).toLocaleString("zh-CN")}
+                    </div>
+                    <div className="text-xs text-muted-foreground flex gap-3">
+                      <span>组 {r.groups_count}</span>
+                      <span>未分组 {r.unique_count}</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full mt-1"
+                      onClick={async () => {
+                        try {
+                          const { result } = await getAnalysisRunDetail(r.id);
+                          if (result) {
+                            setCompareResult(result);
+                            setLastAlgo(r.hash_type);
+                            toast({ title: "已加载历史结果", description: `运行 #${r.id}` });
+                          } else {
+                            toast({ title: "无结果数据", description: `运行 #${r.id} 未保存详细结果`, variant: "destructive" });
+                          }
+                        } catch (error) {
+                          const err = error as APIError;
+                          toast({ title: "加载失败", description: err.message, variant: "destructive" });
+                        }
+                      }}
+                    >
+                      查看结果
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Upload Section */}
         <Card>
@@ -285,8 +387,15 @@ export default function ProjectDetail() {
           projectId={projectId!}
           hasImages={images.length > 1}
           onAnalyze={handleAnalyze}
-          loading={analyzing}
+          loading={analyzing || prefetching}
         />
+
+        {(analyzing || prefetching) && (
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            {analyzing ? "正在分析图片，请稍候…" : "正在加载最新分析结果…"}
+          </div>
+        )}
 
         {/* Compare Result */}
         {compareResult && similarityMatrix && (
@@ -298,13 +407,67 @@ export default function ProjectDetail() {
               <CardDescription>共 {compareResult.total_images} 张图片</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
+              <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground flex flex-wrap gap-4">
+                <span>总图片：{compareResult.total_images}</span>
+                <span>分组：{compareResult.groups.length}</span>
+                <span>未分组：{compareResult.unique_images.length}</span>
+                <span>算法：{lastAlgo}</span>
+                <span className="flex items-center gap-2">
+                  连线算法：
+                  <select
+                    className="border rounded px-2 py-1 text-sm bg-background"
+                    value={matchAlgo}
+                    onChange={(e) => setMatchAlgo(e.target.value as HashType)}
+                  >
+                    <option value="orb">ORB</option>
+                    <option value="brisk">BRISK</option>
+                    <option value="sift">SIFT</option>
+                  </select>
+                </span>
+              </div>
+              <div className="flex justify-end">
+                <Button variant="ghost" size="sm" onClick={() => setShowAdvanced((v) => !v)}>
+                  {showAdvanced ? "隐藏高级视图" : "显示高级视图"}
+                </Button>
+              </div>
+              {showAdvanced && (
+                <>
+                  <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
+                  <SimilarityGraph groups={compareResult.groups} />
+                </>
+              )}
               <div className="space-y-3">
                 {compareResult.groups.map((g) => (
                   <div key={g.group_id} className="p-3 rounded border">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm font-medium">组 {g.group_id}</div>
                       <Badge variant="secondary">平均相似度 {Math.round(g.similarity_score * 100)}%</Badge>
+                      {g.images.length >= 2 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={matchLoadingGroup === g.group_id}
+                          onClick={async () => {
+                            const [a, b] = g.images;
+                            setMatchLoadingGroup(g.group_id);
+                            try {
+                              const { url } = await visualizeMatch(a.id, b.id, matchAlgo);
+                              setMatchImage(url);
+                            } catch (error) {
+                              const err = error as APIError;
+                              toast({
+                                title: "生成特征连线失败",
+                                description: err.message,
+                                variant: "destructive",
+                              });
+                            } finally {
+                              setMatchLoadingGroup(null);
+                            }
+                          }}
+                        >
+                          {matchLoadingGroup === g.group_id ? "生成中..." : "查看特征连线"}
+                        </Button>
+                      )}
                     </div>
                     <div className="flex gap-2 flex-wrap">
                       {g.images.map((img) => (
@@ -338,6 +501,22 @@ export default function ProjectDetail() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {matchImage && (
+          <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center px-4">
+            <div className="bg-background rounded-lg shadow-lg max-w-5xl w-full overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b">
+                <div className="text-sm font-medium">特征点连线</div>
+                <Button variant="ghost" size="sm" onClick={() => setMatchImage(null)}>
+                  关闭
+                </Button>
+              </div>
+              <div className="p-4 max-h-[80vh] overflow-auto bg-black">
+                <img src={matchImage} alt="matches" className="mx-auto max-h-[75vh]" />
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -1,13 +1,23 @@
 import os
 import uuid
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Callable, Any
 import shutil
 
 from sqlmodel import Session, create_engine, select
 from sqlmodel.pool import StaticPool
 
-from .models import Project, Image, ImageRead, ComparisonResult, SimilarGroup, ProjectRead
+from .models import Project, Image, ImageRead, ComparisonResult, SimilarGroup, ProjectRead, AnalysisRun
+import json
+from .image_processor import (
+    group_similar_images,
+    calculate_similarity,
+    calculate_descriptor_similarity,
+    get_cached_descriptor,
+)
+
+# 静态文件根目录（存储 uploads/extracted），默认 data
+STATIC_DIR = Path(os.getenv("STATIC_DIR", "data"))
 
 
 def get_database_url(db_path: str = "data/database.db"):
@@ -157,11 +167,50 @@ def cleanup_project_files(project: Project, upload_dir: str = "data/uploads", ex
     return results
 
 
+def group_similar_by_metric(
+    images: List[dict],
+    threshold: float,
+    scorer: Callable[[dict, dict], float]
+) -> tuple[list[list[dict]], list[dict]]:
+    """
+    通用分组：基于自定义相似度 scorer。
+    返回 (groups, ungrouped)
+    """
+    groups: list[list[dict]] = []
+    ungrouped: list[dict] = []
+    visited = set()
+
+    for i, img in enumerate(images):
+        if img['id'] in visited:
+            continue
+        group = [img]
+        visited.add(img['id'])
+        for j in range(i + 1, len(images)):
+            other = images[j]
+            if other['id'] in visited:
+                continue
+            sim = scorer(img, other)
+            if sim >= threshold:
+                group.append(other)
+                visited.add(other['id'])
+        if len(group) > 1:
+            groups.append(group)
+        else:
+            ungrouped.append(img)
+
+    # 补上未访问的（理论上无）
+    for img in images:
+        if img['id'] not in visited:
+            ungrouped.append(img)
+
+    return groups, ungrouped
+
+
 def compare_images_in_project(
     session: Session,
     project_id: int,
     threshold: float = 0.85,
-    hash_type: str = 'phash'
+    hash_type: str = 'orb'
 ) -> ComparisonResult:
     """
     比对项目中的所有图像
@@ -212,9 +261,32 @@ def compare_images_in_project(
         }
         image_dicts.append(image_dict)
 
+    # 特征类算法需要读取文件计算描述子
+    descriptor_algos = ['orb', 'brisk', 'sift']
+    if hash_type in descriptor_algos:
+        for img in image_dicts:
+            try:
+                fp = STATIC_DIR / img['file_path']
+            desc, norm = get_cached_descriptor(str(fp), img['file_hash'], hash_type)
+                img['descriptor'] = desc
+                img['descriptor_norm'] = norm
+            except Exception:
+                img['descriptor'] = None
+                img['descriptor_norm'] = None
+
     # 执行相似度分组
-    from .image_processor import group_similar_images
-    groups, ungrouped = group_similar_images(image_dicts, threshold, hash_type)
+    if hash_type in descriptor_algos:
+        def scorer(a: dict, b: dict) -> float:
+            desc_sim = calculate_descriptor_similarity(
+                a.get('descriptor'),
+                b.get('descriptor'),
+                a.get('descriptor_norm') or b.get('descriptor_norm') or 4  # 默认 NORM_L2=4
+            )
+            return desc_sim
+
+        groups, ungrouped = group_similar_by_metric(image_dicts, threshold, scorer)
+    else:
+        groups, ungrouped = group_similar_images(image_dicts, threshold, hash_type)
 
     # 转换为响应格式
     similar_groups = []
@@ -226,11 +298,13 @@ def compare_images_in_project(
             count = 0
             for i in range(len(group)):
                 for j in range(i + 1, len(group)):
-                    from .image_processor import calculate_similarity
-                    similarity = calculate_similarity(
-                        group[i][hash_type],
-                        group[j][hash_type]
-                    )
+                    if hash_type in descriptor_algos:
+                        similarity = scorer(group[i], group[j])
+                    else:
+                        similarity = calculate_similarity(
+                            group[i][hash_type],
+                            group[j][hash_type]
+                        )
                     total_similarity += similarity
                     count += 1
             avg_similarity = total_similarity / count if count > 0 else 1.0
@@ -285,9 +359,31 @@ def compare_images_in_project(
         )
         unique_images.append(img_read)
 
-    return ComparisonResult(
+    result = ComparisonResult(
         project_id=project_id,
         total_images=len(images),
         groups=similar_groups,
         unique_images=unique_images
     )
+
+    # 落库存储概要（不含大对象）
+    try:
+        run = AnalysisRun(
+            project_id=project_id,
+            hash_type=hash_type,
+            threshold=threshold,
+            total_images=len(images),
+            groups_count=len(similar_groups),
+            unique_count=len(unique_images),
+            summary=json.dumps(result.model_dump())
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        # 附加 run_id 以便前端引用
+        result_dict = result.model_dump()
+        result_dict["run_id"] = run.id
+        return ComparisonResult.model_validate(result_dict)
+    except Exception:
+        # 持久化失败不影响主流程
+        return result

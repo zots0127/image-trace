@@ -1,11 +1,13 @@
 import { useEffect, useState, useRef } from "react";
-import { getAnalysisStatus, type AnalysisResult } from "@/lib/api";
+import { getAnalysisStatus, type AnalysisResult, type HashType } from "@/lib/api";
 
 interface UseAnalysisPollingProps {
   analysisId: string | null;
   onComplete?: (result: AnalysisResult) => void;
   onError?: (error: Error) => void;
   interval?: number;
+  hashType?: HashType;
+  threshold?: number;
 }
 
 export function useAnalysisPolling({
@@ -13,6 +15,8 @@ export function useAnalysisPolling({
   onComplete,
   onError,
   interval = 3000,
+  hashType = "phash",
+  threshold = 0.85,
 }: UseAnalysisPollingProps) {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isPolling, setIsPolling] = useState(false);
@@ -28,22 +32,13 @@ export function useAnalysisPolling({
 
     const poll = async () => {
       try {
-        const data = await getAnalysisStatus(analysisId);
+        const data = await getAnalysisStatus(analysisId, hashType, threshold);
         setResult(data);
-
-        if (data.status === "completed") {
-          setIsPolling(false);
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-          }
-          onComplete?.(data);
-        } else if (data.status === "failed") {
-          setIsPolling(false);
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-          }
-          onError?.(new Error(data.error || "分析失败"));
+        setIsPolling(false);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
         }
+        onComplete?.(data);
       } catch (error) {
         setIsPolling(false);
         if (intervalRef.current) {

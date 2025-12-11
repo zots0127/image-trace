@@ -1,8 +1,17 @@
 import hashlib
 import os
-from typing import List, Tuple, Dict, Any
+import threading
+import uuid
+from typing import List, Tuple, Dict, Any, Optional
+from pathlib import Path
+import numpy as np
 from PIL import Image as PILImage
 import imagehash
+
+try:
+    import cv2
+except Exception:
+    cv2 = None  # 延迟到使用特征匹配类算法时再报错
 
 
 def compute_file_md5(file_path: str) -> str:
@@ -84,6 +93,193 @@ def calculate_similarity(hash1: str, hash2: str, max_bits: int = 64) -> float:
     distance = hamming_distance(hash1, hash2)
     similarity = (max_bits - distance) / max_bits
     return max(0.0, min(1.0, similarity))
+
+
+def _ensure_cv2():
+    if cv2 is None:
+        raise RuntimeError("未安装 OpenCV（cv2），无法使用 ORB/SIFT/SURF/BRISK/Hybrid。请安装 opencv-contrib-python-headless。")
+
+
+def compute_descriptor(image_path: str, algo: str, max_features: int = 512):
+    """
+    计算局部特征描述子，支持 orb/sift/surf/brisk
+    返回 (descriptor, norm_type)
+    norm_type 用于后续匹配（Hamming 或 L2）
+    """
+    _ensure_cv2()
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise ValueError(f"无法读取图像文件: {image_path}")
+
+    algo = algo.lower()
+    if algo == "orb":
+        extractor = cv2.ORB_create(nfeatures=max_features, scaleFactor=1.2, nlevels=8)
+        norm = cv2.NORM_HAMMING
+    elif algo == "brisk":
+        extractor = cv2.BRISK_create()
+        norm = cv2.NORM_HAMMING
+    elif algo == "sift":
+        if not hasattr(cv2, "SIFT_create"):
+            raise RuntimeError("当前 OpenCV 未包含 SIFT（需要 opencv-contrib-python-headless）。")
+        extractor = cv2.SIFT_create(nfeatures=max_features)
+        norm = cv2.NORM_L2
+    elif algo == "surf":
+        if not hasattr(cv2, "xfeatures2d") or not hasattr(cv2.xfeatures2d, "SURF_create"):
+            raise RuntimeError("当前 OpenCV 未包含 SURF（需要 opencv-contrib-python-headless 的 xfeatures2d）。")
+        extractor = cv2.xfeatures2d.SURF_create()
+        norm = cv2.NORM_L2
+    else:
+        raise ValueError(f"不支持的特征算法: {algo}")
+
+    _, desc = extractor.detectAndCompute(img, None)
+    return desc, norm
+
+
+def compute_descriptor_with_kp(image_path: str, algo: str, max_features: int = 512):
+    """
+    返回 (keypoints, descriptor, norm)
+    """
+    _ensure_cv2()
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise ValueError(f"无法读取图像文件: {image_path}")
+
+    algo = algo.lower()
+    if algo == "orb":
+        extractor = cv2.ORB_create(nfeatures=max_features, scaleFactor=1.2, nlevels=8)
+        norm = cv2.NORM_HAMMING
+    elif algo == "brisk":
+        extractor = cv2.BRISK_create()
+        norm = cv2.NORM_HAMMING
+    elif algo == "sift":
+        if not hasattr(cv2, "SIFT_create"):
+            raise RuntimeError("当前 OpenCV 未包含 SIFT（需要 opencv-contrib-python-headless）。")
+        extractor = cv2.SIFT_create(nfeatures=max_features)
+        norm = cv2.NORM_L2
+    elif algo == "surf":
+        if not hasattr(cv2, "xfeatures2d") or not hasattr(cv2.xfeatures2d, "SURF_create"):
+            raise RuntimeError("当前 OpenCV 未包含 SURF（需要 opencv-contrib-python-headless 的 xfeatures2d）。")
+        extractor = cv2.xfeatures2d.SURF_create()
+        norm = cv2.NORM_L2
+    else:
+        raise ValueError(f"不支持的特征算法: {algo}")
+
+    kps, desc = extractor.detectAndCompute(img, None)
+    return kps, desc, norm
+
+
+# 缓存目录（磁盘）与内存缓存
+DESC_DIR = Path(os.getenv("DESCRIPTOR_DIR", "data/descriptors"))
+DESC_DIR.mkdir(parents=True, exist_ok=True)
+
+# 内存缓存：键 (algo, file_hash) -> (descriptor, norm)
+_DESC_CACHE: Dict[Tuple[str, str], Tuple[Any, int]] = {}
+_DESC_LOCK = threading.Lock()
+
+
+def _disk_path(algo: str, file_hash: str) -> Path:
+    return DESC_DIR / algo / f"{file_hash}.npz"
+
+
+def _load_descriptor_from_disk(algo: str, file_hash: str) -> Optional[Tuple[Any, int]]:
+    path = _disk_path(algo, file_hash)
+    if not path.exists():
+        return None
+    try:
+        data = np.load(path, allow_pickle=False)
+        desc = data["desc"]
+        norm = int(data["norm"])
+        return desc, norm
+    except Exception:
+        return None
+
+
+def _save_descriptor_to_disk(algo: str, file_hash: str, desc, norm: int):
+    path = _disk_path(algo, file_hash)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        np.savez_compressed(path, desc=desc, norm=norm)
+    except Exception:
+        # 忽略持久化失败，不阻塞主流程
+        pass
+
+
+def get_cached_descriptor(image_path: str, file_hash: str, algo: str, max_features: int = 512):
+    key = (algo, file_hash)
+    with _DESC_LOCK:
+        if key in _DESC_CACHE:
+            return _DESC_CACHE[key]
+
+    # 尝试磁盘缓存
+    disk = _load_descriptor_from_disk(algo, file_hash)
+    if disk:
+        with _DESC_LOCK:
+            _DESC_CACHE[key] = disk
+        return disk
+
+    # 计算并写入缓存
+    desc, norm = compute_descriptor(image_path, algo, max_features=max_features)
+    with _DESC_LOCK:
+        _DESC_CACHE[key] = (desc, norm)
+    _save_descriptor_to_disk(algo, file_hash, desc, norm)
+    return desc, norm
+
+
+def calculate_descriptor_similarity(desc1, desc2, norm: int, top_k: int = 64) -> float:
+    """
+    通用局部特征相似度（BFMatcher）
+    返回 0-1，越大越相似。
+    """
+    _ensure_cv2()
+    if desc1 is None or desc2 is None:
+        return 0.0
+    matcher = cv2.BFMatcher(norm, crossCheck=True)
+    matches = matcher.match(desc1, desc2)
+    if not matches:
+        return 0.0
+    matches = sorted(matches, key=lambda m: m.distance)[:top_k]
+    avg_dist = sum(m.distance for m in matches) / len(matches)
+    # 距离转相似度：对 Hamming 用 256 归一，对 L2 用 512 近似上界
+    if norm == cv2.NORM_HAMMING:
+        similarity = 1.0 - min(max(avg_dist, 0.0), 256.0) / 256.0
+    else:
+        similarity = 1.0 - min(max(avg_dist, 0.0), 512.0) / 512.0
+    return max(0.0, min(1.0, similarity))
+
+
+def draw_feature_matches(
+    image_path_a: str,
+    image_path_b: str,
+    algo: str = "orb",
+    output_dir: Path = Path("data/visualizations"),
+    max_features: int = 512,
+    max_matches: int = 40
+) -> Path:
+    """
+    生成特征点匹配可视化图，返回文件路径。
+    """
+    _ensure_cv2()
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    kps1, desc1, norm = compute_descriptor_with_kp(image_path_a, algo, max_features=max_features)
+    kps2, desc2, _ = compute_descriptor_with_kp(image_path_b, algo, max_features=max_features)
+
+    if desc1 is None or desc2 is None:
+        raise ValueError("未能提取到足够的特征点")
+
+    matcher = cv2.BFMatcher(norm, crossCheck=True)
+    matches = matcher.match(desc1, desc2)
+    matches = sorted(matches, key=lambda m: m.distance)[:max_matches]
+
+    img1 = cv2.imread(str(image_path_a))
+    img2 = cv2.imread(str(image_path_b))
+    match_vis = cv2.drawMatches(img1, kps1, img2, kps2, matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+
+    fname = f"match_{algo}_{uuid.uuid4().hex[:8]}.jpg"
+    out_path = output_dir / fname
+    cv2.imwrite(str(out_path), match_vis, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    return out_path
 
 
 def find_similar_images(

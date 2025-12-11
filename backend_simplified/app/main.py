@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from .models import (
     Project, ProjectCreate, ProjectRead, Image, ImageCreate, ImageRead,
-    ComparisonResult
+    ComparisonResult, AnalysisRun
 )
 from .utils import (
     get_session, get_database_url, ensure_directory, save_upload_file,
@@ -19,6 +19,7 @@ from .utils import (
     compare_images_in_project
 )
 from .image_processor import compute_image_features, is_image_file
+from .image_processor import draw_feature_matches
 from .document_parser import DocumentParser
 
 
@@ -358,7 +359,7 @@ async def compare_project_images(
     if not 0 <= threshold <= 1:
         raise HTTPException(status_code=400, detail="阈值必须在0-1之间")
 
-    if hash_type not in ['phash', 'dhash', 'ahash', 'whash']:
+    if hash_type not in ['orb', 'brisk', 'sift']:
         raise HTTPException(status_code=400, detail="不支持的哈希类型")
 
     try:
@@ -381,6 +382,46 @@ async def get_comparison_results(
     获取项目的比对结果（同POST /compare，但使用GET方法）
     """
     return await compare_project_images(project_id, threshold, hash_type, BackgroundTasks(), session)
+
+
+@app.get("/analysis_runs")
+async def list_analysis_runs(
+    project_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    session: Session = Depends(get_db)
+):
+    statement = (
+        select(AnalysisRun)
+        .where(AnalysisRun.project_id == project_id)
+        .order_by(AnalysisRun.id.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    runs = session.exec(statement).all()
+    return runs
+
+
+@app.get("/analysis_runs/{run_id}")
+async def get_analysis_run(
+    run_id: int,
+    session: Session = Depends(get_db)
+):
+    run = session.get(AnalysisRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="分析记录不存在")
+
+    parsed = None
+    if run.summary:
+        try:
+            parsed = json.loads(run.summary)
+        except Exception:
+            parsed = None
+
+    return {
+        "run": run,
+        "result": parsed
+    }
 
 
 @app.get("/download/{file_path:path}")
@@ -424,6 +465,47 @@ async def download_file(file_path: str):
         filename=full_path.name,
         media_type=media_type
     )
+
+
+@app.post("/visualize_match")
+async def visualize_match(
+    image_a_id: int = Form(...),
+    image_b_id: int = Form(...),
+    hash_type: str = Form(default="orb"),
+    session: Session = Depends(get_db)
+):
+    """
+    生成两张图片的特征点匹配可视化，返回可下载路径
+    """
+    descriptor_algos = ['orb', 'brisk', 'sift']
+    algo = hash_type
+    if algo not in descriptor_algos:
+        raise HTTPException(status_code=400, detail="该算法不支持特征点可视化")
+
+    img_a = session.get(Image, image_a_id)
+    img_b = session.get(Image, image_b_id)
+    if not img_a or not img_b:
+        raise HTTPException(status_code=404, detail="图像不存在")
+
+    def resolve_path(fp: str) -> Path:
+        if fp.startswith("data/"):
+            fp = fp[len("data/"):]
+        return STATIC_DIR / fp
+
+    path_a = resolve_path(img_a.file_path or "")
+    path_b = resolve_path(img_b.file_path or "")
+    if not path_a.exists() or not path_b.exists():
+        raise HTTPException(status_code=404, detail="图像文件不存在")
+
+    try:
+        vis_path = draw_feature_matches(str(path_a), str(path_b), algo=algo, output_dir=STATIC_DIR / "visualizations")
+        rel_path = vis_path.relative_to(STATIC_DIR)
+        return {
+            "file_path": str(rel_path),
+            "media_type": "image/jpeg"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成可视化失败: {str(e)}")
 
 
 @app.get("/images/{project_id}")
