@@ -71,6 +71,13 @@ const exeName = process.platform === "win32" ? `${baseName}.exe` : baseName;
 
 const toPosix = (p) => p.split(path.sep).join("/");
 
+function existingTxtGlobs() {
+  const appDir = path.join(backendDir, "app");
+  if (!fs.existsSync(appDir)) return [];
+  const hasTxt = fs.readdirSync(appDir).some((f) => f.endsWith(".txt"));
+  return hasTxt ? [`--include-data-files=${toPosix(path.join(appDir, "*.txt"))}=app/`] : [];
+}
+
 const args = [
   "-m",
   "nuitka",
@@ -84,8 +91,8 @@ const args = [
   "--include-package=fitz",
   "--include-package=imagehash",
   `--include-data-files=${toPosix(path.join(backendDir, "app", "*.py"))}=app/`,
-  `--include-data-files=${toPosix(path.join(backendDir, "app", "*.txt"))}=app/`,
   "--nofollow-import-to=tests",
+  ...existingTxtGlobs(),
 ];
 
 run(py, args, backendDir);
