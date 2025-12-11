@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ export default function Auth() {
   const navigate = useNavigate();
   const { signIn, signUp, signInWithGithub, user, offline } = useAuth();
   const { toast } = useToast();
+  const { t } = useTranslation();
   
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
@@ -30,7 +32,7 @@ export default function Auth() {
     
     if (!email || !password) {
       toast({
-        title: "请填写所有字段",
+        title: t("common.fillAllFields"),
         variant: "destructive",
       });
       return;
@@ -41,7 +43,7 @@ export default function Auth() {
       const { error } = await signIn(email, password);
       if (error) {
         toast({
-          title: "登录失败",
+          title: t("common.signIn"),
           description: error.message,
           variant: "destructive",
         });
@@ -58,7 +60,7 @@ export default function Auth() {
     
     if (!email || !password) {
       toast({
-        title: "请填写所有字段",
+        title: t("common.fillAllFields"),
         variant: "destructive",
       });
       return;
@@ -66,8 +68,8 @@ export default function Auth() {
 
     if (password.length < 6) {
       toast({
-        title: "密码过短",
-        description: "密码至少需要6个字符",
+        title: t("common.passwordTooShort"),
+        description: t("common.passwordRequirement"),
         variant: "destructive",
       });
       return;
@@ -103,20 +105,20 @@ export default function Auth() {
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">图像溯源分析系统</CardTitle>
           <CardDescription>
-            {offline ? "离线模式：无需账号可本地使用" : "登录或注册以开始使用"}
+            {offline ? t("common.offlineMode") : t("common.onlineTip")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="signin" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="signin">登录</TabsTrigger>
-              <TabsTrigger value="signup">注册</TabsTrigger>
+              <TabsTrigger value="signin">{t("common.signIn")}</TabsTrigger>
+              <TabsTrigger value="signup">{t("common.signUp")}</TabsTrigger>
             </TabsList>
             
             <TabsContent value="signin">
               <form onSubmit={handleSignIn} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="signin-email">邮箱</Label>
+                  <Label htmlFor="signin-email">{t("common.email")}</Label>
                   <Input
                     id="signin-email"
                     type="email"
@@ -128,7 +130,7 @@ export default function Auth() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="signin-password">密码</Label>
+                  <Label htmlFor="signin-password">{t("common.password")}</Label>
                   <Input
                     id="signin-password"
                     type="password"
@@ -145,13 +147,13 @@ export default function Auth() {
                   ) : (
                     <LogIn className="h-4 w-4 mr-2" />
                   )}
-                  登录
+                  {t("common.signIn")}
                 </Button>
 
                 <div className="relative my-4">
                   <Separator />
                   <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
-                    或
+                    {t("common.or")}
                   </span>
                 </div>
 
@@ -163,7 +165,7 @@ export default function Auth() {
                   disabled={loading}
                 >
                   <Github className="h-4 w-4 mr-2" />
-                  使用 GitHub 登录
+                  {t("common.loginWithGithub")}
                 </Button>
               </form>
             </TabsContent>
@@ -171,7 +173,7 @@ export default function Auth() {
             <TabsContent value="signup">
               <form onSubmit={handleSignUp} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="signup-email">邮箱</Label>
+                  <Label htmlFor="signup-email">{t("common.email")}</Label>
                   <Input
                     id="signup-email"
                     type="email"
@@ -183,7 +185,7 @@ export default function Auth() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="signup-password">密码</Label>
+                  <Label htmlFor="signup-password">{t("common.password")}</Label>
                   <Input
                     id="signup-password"
                     type="password"
@@ -195,7 +197,7 @@ export default function Auth() {
                     minLength={6}
                   />
                   <p className="text-xs text-muted-foreground">
-                    密码至少需要6个字符
+                    {t("common.passwordRequirement")}
                   </p>
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
@@ -204,13 +206,13 @@ export default function Auth() {
                   ) : (
                     <UserPlus className="h-4 w-4 mr-2" />
                   )}
-                  注册
+                  {t("common.signUp")}
                 </Button>
 
                 <div className="relative my-4">
                   <Separator />
                   <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
-                    或
+                    {t("common.or")}
                   </span>
                 </div>
 
@@ -222,7 +224,7 @@ export default function Auth() {
                   disabled={loading}
                 >
                   <Github className="h-4 w-4 mr-2" />
-                  使用 GitHub 注册
+                  {t("common.registerWithGithub")}
                 </Button>
               </form>
             </TabsContent>

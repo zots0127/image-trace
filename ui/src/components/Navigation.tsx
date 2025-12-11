@@ -3,12 +3,14 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Menu, X, Image as ImageIcon, LogOut, LayoutDashboard } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export function Navigation() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { t, i18n } = useTranslation();
 
   const handleSignOut = async () => {
     await signOut();
@@ -30,7 +32,7 @@ export function Navigation() {
             <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
               <ImageIcon className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span className="font-bold text-lg text-foreground">ImageTrace</span>
+            <span className="font-bold text-lg text-foreground">{t("common.appName")}</span>
           </div>
 
           {/* Desktop Navigation */}
@@ -41,7 +43,7 @@ export function Navigation() {
                 isDashboard ? "text-primary" : "text-muted-foreground"
               }`}
             >
-              控制台
+              {t("common.dashboard")}
             </button>
             <button 
               onClick={() => navigate("/demo")}
@@ -49,7 +51,7 @@ export function Navigation() {
                 location.pathname === "/demo" ? "text-primary" : "text-muted-foreground"
               }`}
             >
-              在线演示
+              Demo
             </button>
           </div>
 
@@ -63,7 +65,7 @@ export function Navigation() {
                   onClick={() => navigate("/dashboard")}
                 >
                   <LayoutDashboard className="w-4 h-4 mr-2" />
-                  控制台
+                  {t("common.dashboard")}
                 </Button>
                 <Button 
                   variant="outline" 
@@ -71,7 +73,7 @@ export function Navigation() {
                   onClick={handleSignOut}
                 >
                   <LogOut className="w-4 h-4 mr-2" />
-                  退出
+                  {t("common.logout")}
                 </Button>
               </>
             ) : (
@@ -80,10 +82,17 @@ export function Navigation() {
                   size="sm"
                   onClick={() => navigate("/auth")}
                 >
-                  登录 / 注册
+                  {t("common.signIn")} / {t("common.signUp")}
                 </Button>
               </>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => i18n.changeLanguage(i18n.language === "zh" ? "en" : "zh")}
+            >
+              {i18n.language === "zh" ? "EN" : "中文"}
+            </Button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -107,13 +116,13 @@ export function Navigation() {
                 onClick={() => { navigate("/demo"); setMobileMenuOpen(false); }}
                 className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
               >
-                在线演示
+                Demo
               </button>
               <button 
                 onClick={() => { navigate("/dashboard"); setMobileMenuOpen(false); }}
                 className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
               >
-                控制台
+                {t("common.dashboard")}
               </button>
               <div className="border-t border-border my-2" />
               {user ? (
@@ -121,7 +130,7 @@ export function Navigation() {
                   onClick={() => { handleSignOut(); setMobileMenuOpen(false); }}
                   className="px-4 py-2 text-left text-destructive hover:bg-muted rounded-md"
                 >
-                  退出登录
+                  {t("common.logout")}
                 </button>
               ) : (
                 <>
@@ -129,10 +138,18 @@ export function Navigation() {
                     className="mx-4"
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
-                    登录 / 注册
+                    {t("common.signIn")} / {t("common.signUp")}
                   </Button>
                 </>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mx-4 mt-2"
+                onClick={() => { i18n.changeLanguage(i18n.language === "zh" ? "en" : "zh"); setMobileMenuOpen(false); }}
+              >
+                {i18n.language === "zh" ? "EN" : "中文"}
+              </Button>
             </div>
           </div>
         )}

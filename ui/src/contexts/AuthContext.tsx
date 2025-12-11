@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -27,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const loadLocalUser = () => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -76,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const u = { email };
       setUser(u);
       persistLocalUser(u);
-      toast({ title: "离线注册成功", description: "已创建本地账户" });
+      toast({ title: t("toast.offlineSignUp"), description: t("toast.offlineSignUp") });
       return { error: null };
     }
     const { error, data } = await supabase.auth.signUp({
@@ -87,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!error) {
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
-      toast({ title: "注册成功", description: "请查收验证邮件" });
+      toast({ title: t("toast.signUpSuccess") });
     }
     return { error };
   };
@@ -97,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const u = { email };
       setUser(u);
       persistLocalUser(u);
-      toast({ title: "离线登录成功", description: "已使用本地账户" });
+      toast({ title: t("toast.offlineSignIn"), description: t("toast.offlineSignIn") });
       return { error: null };
     }
     const { error, data } = await supabase.auth.signInWithPassword({ email, password });
@@ -105,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session ?? null);
       setUser(data.session?.user ?? null);
       persistLocalUser(null); // 清除本地假账户
-      toast({ title: "登录成功", description: "欢迎回来！" });
+      toast({ title: t("toast.signInSuccess"), description: t("common.welcomeBack") });
     }
     return { error };
   };
@@ -123,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: { redirectTo: `${window.location.origin}/` },
     });
     if (error) {
-      toast({ title: "GitHub 登录失败", description: error.message, variant: "destructive" });
+      toast({ title: t("toast.githubFailed"), description: error.message, variant: "destructive" });
     }
     return { error };
   };
@@ -135,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setUser(null);
     persistLocalUser(null);
-    toast({ title: "已退出登录" });
+    toast({ title: t("toast.signOut") });
   };
 
   return (
