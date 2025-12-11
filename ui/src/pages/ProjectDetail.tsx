@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getProject,
-  getAnalysisResult,
   getProjectDocuments,
+  getProjectImages,
+  analyzeImages,
   type Project,
   type Image,
   type AnalysisResult,
@@ -15,7 +16,6 @@ import { DocumentUploadZone } from "@/components/DocumentUploadZone";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { SimilarityMatrix } from "@/components/SimilarityMatrix";
 import { SystemHealth } from "@/components/SystemHealth";
-import { useAnalysisPolling } from "@/hooks/useAnalysisPolling";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,50 +31,23 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [images, setImages] = useState<Image[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [currentAnalysisId, setCurrentAnalysisId] = useState<string | null>(null);
-  const [completedAnalyses, setCompletedAnalyses] = useState<AnalysisResult[]>([]);
+  const [compareResult, setCompareResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const { result: pollingResult, isPolling } = useAnalysisPolling({
-    analysisId: currentAnalysisId,
-    onComplete: async (result) => {
-      toast({
-        title: "分析完成",
-        description: "图片分析已成功完成",
-      });
-      
-      // 获取完整的分析结果
-      try {
-        const fullResult = await getAnalysisResult(result.analysis_id);
-        setCompletedAnalyses((prev) => [fullResult, ...prev]);
-      } catch (error) {
-        console.error("获取分析结果失败:", error);
-        setCompletedAnalyses((prev) => [result, ...prev]);
-      }
-      
-      setCurrentAnalysisId(null);
-    },
-    onError: (error) => {
-      toast({
-        title: "分析失败",
-        description: error.message,
-        variant: "destructive",
-      });
-      setCurrentAnalysisId(null);
-    },
-  });
+  const [analyzing, setAnalyzing] = useState(false);
 
   const loadProject = async () => {
     if (!projectId) return;
 
     setLoading(true);
     try {
-      const [projectData, documentsData] = await Promise.all([
+      const [projectData, documentsData, imagesData] = await Promise.all([
         getProject(projectId),
         getProjectDocuments(projectId),
+        getProjectImages(projectId),
       ]);
       setProject(projectData);
       setDocuments(documentsData);
+      setImages(imagesData);
     } catch (error) {
       const err = error as APIError;
       toast({
@@ -109,16 +82,13 @@ export default function ProjectDetail() {
 
   const handleImagesUploaded = (uploadedImages: Image[]) => {
     setImages((prev) => [...prev, ...uploadedImages]);
+    setCompareResult(null);
   };
 
   const handleDocumentUploaded = (document: Document) => {
     setDocuments((prev) => [document, ...prev]);
     // 重新加载项目以获取提取的图片
     loadProject();
-  };
-
-  const handleAnalysisStarted = (analysisId: string) => {
-    setCurrentAnalysisId(analysisId);
   };
 
   const getAlgorithmLabel = (algo: string) => {
@@ -130,23 +100,63 @@ export default function ProjectDetail() {
     return labels[algo] || algo;
   };
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, any> = {
-      completed: "default",
-      processing: "secondary",
-      failed: "destructive",
-    };
-    const labels: Record<string, string> = {
-      completed: "已完成",
-      processing: "处理中",
-      failed: "失败",
-    };
-    return (
-      <Badge variant={variants[status] || "secondary"}>
-        {labels[status] || status}
-      </Badge>
-    );
+  const handleAnalyze = async (algo: "fast" | "orb" | "hybrid") => {
+    if (!projectId) return;
+    setAnalyzing(true);
+    try {
+      const res = await analyzeImages(projectId, algo);
+      setCompareResult(res);
+      toast({ title: "分析完成", description: `共 ${res.total_images} 张图片，分组 ${res.groups.length}` });
+    } catch (error) {
+      const err = error as APIError;
+      toast({
+        title: "分析失败",
+        description: err.message,
+        variant: "destructive",
+        action: (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+            onClick={async () => {
+              const success = await copyErrorToClipboard(err);
+              if (success) {
+                toast({ title: "已复制错误详情" });
+              }
+            }}
+          >
+            <Copy className="h-3 w-3 mr-1" />
+            复制
+          </Button>
+        ),
+      });
+    } finally {
+      setAnalyzing(false);
+    }
   };
+
+  const similarityMatrix = useMemo(() => {
+    if (!compareResult) return null;
+    // Flatten all images for matrix display
+    const allImages: Image[] = [
+      ...compareResult.groups.flatMap((g) => g.images),
+      ...compareResult.unique_images,
+    ];
+    const n = allImages.length;
+    if (n === 0) return null;
+    const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+    // For each group, set similarity_score for pairs
+    compareResult.groups.forEach((g) => {
+      const indices = g.images.map((img) => allImages.findIndex((x) => x.id === img.id)).filter((i) => i >= 0);
+      for (let i = 0; i < indices.length; i++) {
+        for (let j = i + 1; j < indices.length; j++) {
+          matrix[indices[i]][indices[j]] = g.similarity_score;
+          matrix[indices[j]][indices[i]] = g.similarity_score;
+        }
+      }
+    });
+    return { matrix, images: allImages };
+  }, [compareResult]);
 
   if (loading) {
     return (
@@ -258,9 +268,8 @@ export default function ProjectDetail() {
                       <div>
                         <p className="font-medium">{doc.filename}</p>
                         <p className="text-xs text-muted-foreground">
-                          {(doc.file_size / 1024 / 1024).toFixed(2)} MB
                           {doc.extracted_images_count !== undefined && (
-                            <> • 提取 {doc.extracted_images_count} 张图片</>
+                            <>提取 {doc.extracted_images_count} 张图片</>
                           )}
                         </p>
                       </div>
@@ -304,7 +313,7 @@ export default function ProjectDetail() {
                     className="group relative aspect-square rounded-lg border overflow-hidden hover:shadow-lg transition-all"
                   >
                     <img
-                      src={image.public_url}
+                      src={image.public_url || "/placeholder.svg"}
                       alt={image.filename}
                       className="w-full h-full object-cover"
                       onError={(e) => {
@@ -326,75 +335,65 @@ export default function ProjectDetail() {
           </Card>
         )}
 
-        {/* Current Analysis Status */}
-        {isPolling && pollingResult && (
+        {/* Analysis */}
+        <AnalysisPanel
+          projectId={projectId!}
+          hasImages={images.length > 1}
+          onAnalyze={handleAnalyze}
+          loading={analyzing}
+        />
+
+        {/* Compare Result */}
+        {compareResult && similarityMatrix && (
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>分析进度</CardTitle>
-                {getStatusBadge(pollingResult.status)}
-              </div>
+              <CardTitle>
+                相似分组（{compareResult.groups.length} 组，未分组 {compareResult.unique_images.length} 张）
+              </CardTitle>
+              <CardDescription>共 {compareResult.total_images} 张图片</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <div>
-                  <p className="text-sm font-medium">
-                    正在使用 {getAlgorithmLabel(pollingResult.algorithm)} 分析...
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    分析ID: {pollingResult.analysis_id}
-                  </p>
-                </div>
+            <CardContent className="space-y-6">
+              <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
+              <div className="space-y-3">
+                {compareResult.groups.map((g) => (
+                  <div key={g.group_id} className="p-3 rounded border">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm font-medium">组 {g.group_id}</div>
+                      <Badge variant="secondary">平均相似度 {Math.round(g.similarity_score * 100)}%</Badge>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {g.images.map((img) => (
+                        <div key={img.id} className="w-24 h-24 overflow-hidden rounded border">
+                          <img
+                            src={img.public_url || "/placeholder.svg"}
+                            alt={img.filename}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {compareResult.unique_images.length > 0 && (
+                  <div className="p-3 rounded border">
+                    <div className="text-sm font-medium mb-2">未分组</div>
+                    <div className="flex gap-2 flex-wrap">
+                      {compareResult.unique_images.map((img) => (
+                        <div key={img.id} className="w-24 h-24 overflow-hidden rounded border">
+                          <img
+                            src={img.public_url || "/placeholder.svg"}
+                            alt={img.filename}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
         )}
-
-        {/* Completed Analyses */}
-        {completedAnalyses.length > 0 && (
-          <div className="space-y-4">
-            <h2 className="text-2xl font-bold">分析结果</h2>
-            {completedAnalyses.map((analysis) => (
-              <Card key={analysis.analysis_id}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>
-                        {getAlgorithmLabel(analysis.algorithm)} 分析
-                      </CardTitle>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        分析ID: {analysis.analysis_id}
-                      </p>
-                    </div>
-                    {getStatusBadge(analysis.status)}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {analysis.status === "completed" && analysis.similarity_matrix ? (
-                    <SimilarityMatrix matrix={analysis.similarity_matrix} />
-                  ) : analysis.status === "failed" ? (
-                    <div className="text-destructive">
-                      <p className="font-medium">分析失败</p>
-                      {analysis.error && (
-                        <p className="text-sm mt-1">{analysis.error}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground">等待结果...</p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {/* Analysis Panel */}
-        <AnalysisPanel
-          projectId={projectId!}
-          hasImages={images.length > 0}
-          onAnalysisStarted={handleAnalysisStarted}
-        />
       </div>
     </div>
   );

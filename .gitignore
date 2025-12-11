@@ -23,6 +23,12 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.idea/
+.vscode/
+.DS_Store
+
+# allow ui source libs to be tracked
+!ui/src/lib/
 .venv/
 venv/
 ENV/

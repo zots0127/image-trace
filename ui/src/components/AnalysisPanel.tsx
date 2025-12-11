@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
 interface AnalysisPanelProps {
   projectId: string;
   hasImages: boolean;
-  onAnalysisStarted: (analysisId: string) => void;
+  loading?: boolean;
+  onAnalyze: (algo: "fast" | "orb" | "hybrid") => void;
 }
 
 const algorithms = [
@@ -36,46 +37,12 @@ const algorithms = [
   },
 ];
 
-export function AnalysisPanel({ projectId, hasImages, onAnalysisStarted }: AnalysisPanelProps) {
+export function AnalysisPanel({ projectId, hasImages, onAnalyze, loading }: AnalysisPanelProps) {
   const [algorithm, setAlgorithm] = useState<"fast" | "orb" | "hybrid">("fast");
-  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   const handleAnalyze = async () => {
-    setLoading(true);
-    try {
-      const result = await analyzeImages(projectId, algorithm);
-      toast({
-        title: "分析已启动",
-        description: "图片分析正在进行中，请稍候...",
-      });
-      onAnalysisStarted(result.analysis_id);
-    } catch (error) {
-      const err = error as APIError;
-      toast({
-        title: "分析失败",
-        description: err.message,
-        variant: "destructive",
-        action: (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="bg-white/10 hover:bg-white/20 text-white border-white/20"
-            onClick={async () => {
-              const success = await copyErrorToClipboard(err);
-              if (success) {
-                toast({ title: "已复制错误详情" });
-              }
-            }}
-          >
-            <Copy className="h-3 w-3 mr-1" />
-            复制
-          </Button>
-        ),
-      });
-    } finally {
-      setLoading(false);
-    }
+    onAnalyze(algorithm);
   };
 
   return (
