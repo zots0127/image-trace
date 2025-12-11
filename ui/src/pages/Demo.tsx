@@ -30,31 +30,21 @@ const Demo = () => {
   const [result, setResult] = useState<{ similarity: number } | null>(null);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    if (images.length + acceptedFiles.length > 2) {
-      toast({
-        title: "演示限制",
-        description: "演示模式最多支持2张图片",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const newImages = acceptedFiles.slice(0, 2 - images.length).map(file => ({
+    if (acceptedFiles.length === 0) return;
+    const newImages = acceptedFiles.map(file => ({
       file,
       preview: URL.createObjectURL(file)
     }));
-    
     setImages(prev => [...prev, ...newImages]);
     setResult(null);
-  }, [images, toast]);
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg', '.webp']
     },
-    maxFiles: 2,
-    disabled: images.length >= 2
+    disabled: false
   });
 
   const removeImage = (index: number) => {
@@ -116,7 +106,7 @@ const Demo = () => {
               图像相似度分析演示
             </h1>
             <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-              上传2张图片，体验AI驱动的图像相似度分析。
+              上传多张图片，体验AI驱动的图像相似度分析。
               {!user && "注册账号可解锁批量分析和完整功能。"}
             </p>
           </div>
@@ -128,9 +118,7 @@ const Demo = () => {
                 <Upload className="w-5 h-5" />
                 上传图片
               </CardTitle>
-              <CardDescription>
-                拖放或点击上传，最多2张图片（演示限制）
-              </CardDescription>
+              <CardDescription>拖放或点击上传，支持多张图片</CardDescription>
             </CardHeader>
             <CardContent>
               {/* Image Previews */}
@@ -157,19 +145,17 @@ const Demo = () => {
                     </div>
                   ))}
                   
-                  {/* Empty slot */}
-                  {images.length === 1 && (
-                    <div 
-                      {...getRootProps()}
-                      className="aspect-square rounded-lg border-2 border-dashed border-border flex items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
-                    >
-                      <input {...getInputProps()} />
-                      <div className="text-center">
-                        <ImageIcon className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                        <span className="text-sm text-muted-foreground">添加第2张图片</span>
-                      </div>
+                  {/* Add more */}
+                  <div 
+                    {...getRootProps()}
+                    className="aspect-square rounded-lg border-2 border-dashed border-border flex items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
+                  >
+                    <input {...getInputProps()} />
+                    <div className="text-center">
+                      <ImageIcon className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <span className="text-sm text-muted-foreground">继续添加图片</span>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
 
@@ -195,7 +181,7 @@ const Demo = () => {
               )}
 
               {/* Analyze Button */}
-              {images.length === 2 && (
+              {images.length >= 2 && (
                 <Button 
                   onClick={analyzeImages}
                   disabled={analyzing}
