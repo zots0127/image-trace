@@ -9,6 +9,14 @@
 
 ## 快速开始
 
+### 下载已编译版本（最快）
+1) 前往 Releases：<https://github.com/zots0127/image-trace/releases/latest>  
+2) 选择你的平台包并解压/安装：  
+   - macOS（Apple/Intel）：`ImageTrace-mac-*.dmg` 或 `.zip`  
+   - Windows：`ImageTrace-win-*.exe`  
+3) 首次运行若遇到安全拦截，按下方“常见问题（macOS）”处理 Gatekeeper 或在 Windows 选择“仍要运行”。  
+4) 启动后按界面提示创建项目、上传文件并开始比对。
+
 ### 桌面应用（推荐，内置后端）
 1) 安装 Node.js 18+ 与 npm。  
 2) `cd desktop && npm install`  
