@@ -45,8 +45,8 @@ const App = () => (
               }
             />
             
-            {/* Redirect root to landing */}
-            <Route path="/" element={<Navigate to="/landing" replace />} />
+            {/* Redirect root to dashboard */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

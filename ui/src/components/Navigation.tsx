@@ -12,10 +12,10 @@ export function Navigation() {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate("/landing");
+    navigate("/dashboard");
   };
 
-  const isLandingPage = location.pathname === "/landing";
+  const isLandingPage = location.pathname === "/landing"; // still used if user manually enters
   const isDashboard = location.pathname === "/dashboard" || location.pathname.startsWith("/project/");
 
   return (
@@ -25,7 +25,7 @@ export function Navigation() {
           {/* Logo */}
           <div 
             className="flex items-center gap-2 cursor-pointer"
-            onClick={() => navigate("/landing")}
+            onClick={() => navigate("/dashboard")}
           >
             <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
               <ImageIcon className="w-5 h-5 text-primary-foreground" />
@@ -36,12 +36,12 @@ export function Navigation() {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
             <button 
-              onClick={() => navigate("/landing")}
+              onClick={() => navigate("/dashboard")}
               className={`text-sm font-medium transition-colors hover:text-primary ${
-                isLandingPage ? "text-primary" : "text-muted-foreground"
+                isDashboard ? "text-primary" : "text-muted-foreground"
               }`}
             >
-              首页
+              控制台
             </button>
             <button 
               onClick={() => navigate("/demo")}
@@ -51,16 +51,6 @@ export function Navigation() {
             >
               在线演示
             </button>
-            {user && (
-              <button 
-                onClick={() => navigate("/dashboard")}
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  isDashboard ? "text-primary" : "text-muted-foreground"
-                }`}
-              >
-                控制台
-              </button>
-            )}
           </div>
 
           {/* Desktop Auth Buttons */}
@@ -87,17 +77,10 @@ export function Navigation() {
             ) : (
               <>
                 <Button 
-                  variant="ghost" 
                   size="sm"
                   onClick={() => navigate("/auth")}
                 >
-                  登录
-                </Button>
-                <Button 
-                  size="sm"
-                  onClick={() => navigate("/auth")}
-                >
-                  免费注册
+                  登录 / 注册
                 </Button>
               </>
             )}
@@ -121,25 +104,17 @@ export function Navigation() {
           <div className="md:hidden py-4 border-t border-border">
             <div className="flex flex-col gap-2">
               <button 
-                onClick={() => { navigate("/landing"); setMobileMenuOpen(false); }}
-                className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
-              >
-                首页
-              </button>
-              <button 
                 onClick={() => { navigate("/demo"); setMobileMenuOpen(false); }}
                 className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
               >
                 在线演示
               </button>
-              {user && (
-                <button 
-                  onClick={() => { navigate("/dashboard"); setMobileMenuOpen(false); }}
-                  className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
-                >
-                  控制台
-                </button>
-              )}
+              <button 
+                onClick={() => { navigate("/dashboard"); setMobileMenuOpen(false); }}
+                className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
+              >
+                控制台
+              </button>
               <div className="border-t border-border my-2" />
               {user ? (
                 <button 
@@ -150,17 +125,11 @@ export function Navigation() {
                 </button>
               ) : (
                 <>
-                  <button 
-                    onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
-                    className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
-                  >
-                    登录
-                  </button>
                   <Button 
                     className="mx-4"
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
-                    免费注册
+                    登录 / 注册
                   </Button>
                 </>
               )}
