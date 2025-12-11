@@ -80,6 +80,7 @@ jobs:
           name: image-trace-desktop-${{ runner.os }}
           path: |
             desktop/dist/**
+            desktop/backend_bin/**
 
   release:
     name: Release
@@ -107,3 +108,4 @@ jobs:
             artifacts/**/*.rpm
             artifacts/**/*latest*.yml
             artifacts/**/*.blockmap
+            artifacts/backend_bin/**
