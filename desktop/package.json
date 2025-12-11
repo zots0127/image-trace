@@ -6,10 +6,11 @@
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "electron .",
+    "dev": "node scripts/run-electron.cjs",
+    "build:frontend": "node scripts/build-frontend.cjs",
     "build:backend": "node scripts/build-backend.cjs",
     "pack": "electron-builder --dir",
-    "dist": "npm run build:backend && electron-builder --publish never"
+    "dist": "npm run build:frontend && npm run build:backend && electron-builder --publish never"
   },
   "devDependencies": {
     "electron": "^31.7.0",

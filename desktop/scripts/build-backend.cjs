@@ -3,8 +3,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function repoRoot() {
-  // desktop -> repo root
-  return path.resolve(process.cwd(), '..');
+  // 脚本位置：desktop/scripts/build-backend.cjs
+  // repo root：desktop/..
+  return path.resolve(__dirname, '..', '..');
 }
 
 function run(cmd, args, cwd) {
@@ -16,6 +17,26 @@ function run(cmd, args, cwd) {
 }
 
 function detectPython() {
+  // 允许显式指定 Python（推荐在 venv 下构建）：
+  //   PYTHON=/path/to/python node scripts/build-backend.cjs
+  if (process.env.PYTHON) {
+    const r = spawnSync(process.env.PYTHON, ['--version'], { stdio: 'inherit' });
+    if (r.status === 0) return process.env.PYTHON;
+    throw new Error(`PYTHON 指定的解释器不可用：${process.env.PYTHON}`);
+  }
+
+  // 优先使用仓库根目录下的 .venv（避免误用 conda/system python）
+  const root = repoRoot();
+  const venvCandidates = process.platform === 'win32'
+    ? [path.join(root, '.venv', 'Scripts', 'python.exe')]
+    : [path.join(root, '.venv', 'bin', 'python')];
+  for (const p of venvCandidates) {
+    if (fs.existsSync(p)) {
+      const r = spawnSync(p, ['--version'], { stdio: 'inherit' });
+      if (r.status === 0) return p;
+    }
+  }
+
   for (const c of ['python', 'python3']) {
     const r = spawnSync(c, ['--version'], { stdio: 'ignore' });
     if (r.status === 0) return c;

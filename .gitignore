@@ -1,3 +1,6 @@
+# Local UI build inputs/outputs
+ui/node_modules/
+ui/dist/
 # Python
 __pycache__/
 *.py[cod]

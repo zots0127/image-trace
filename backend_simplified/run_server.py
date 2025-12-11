@@ -14,10 +14,20 @@
 """
 
 import os
+import sys
 from pathlib import Path
 
 
 def main() -> None:
+    # 确保可以找到 app 包（PyInstaller onefile 会解压到 _MEIPASS）
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    for p in (base_dir, base_dir / "app"):
+        if str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+
+    # 强制加载 app 包，避免 uvicorn 动态导入漏打包
+    import app.main  # type: ignore  # noqa: F401
+
     host = os.getenv("IMAGE_TRACE_HOST", "127.0.0.1")
     port = int(os.getenv("IMAGE_TRACE_PORT", "8000"))
 
