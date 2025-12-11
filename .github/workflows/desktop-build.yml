@@ -51,7 +51,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend_simplified/requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller nuitka
 
       - name: Install UI deps
         working-directory: ui

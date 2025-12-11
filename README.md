@@ -14,6 +14,8 @@
 2) 选择你的平台包并解压/安装：  
    - macOS（Apple/Intel）：`ImageTrace-mac-*.dmg` 或 `.zip`  
    - Windows：`ImageTrace-win-*.exe`  
+   - Linux：`Image.Trace-*.AppImage`  
+   - 后端二进制同时内置 **PyInstaller** 与 **Nuitka** 版本，应用会优先使用 Nuitka（如存在）。  
 3) 首次运行若遇到安全拦截，按下方“常见问题（macOS）”处理 Gatekeeper 或在 Windows 选择“仍要运行”。  
 4) 启动后按界面提示创建项目、上传文件并开始比对。
 

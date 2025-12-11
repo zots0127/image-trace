@@ -9,8 +9,9 @@
     "dev": "node scripts/run-electron.cjs",
     "build:frontend": "node scripts/build-frontend.cjs",
     "build:backend": "node scripts/build-backend.cjs",
+    "build:backend:nuitka": "node scripts/build-backend-nuitka.cjs",
     "pack": "electron-builder --dir",
-    "dist": "npm run build:frontend && npm run build:backend && electron-builder --publish never"
+    "dist": "npm run build:frontend && npm run build:backend && npm run build:backend:nuitka && electron-builder --publish never"
   },
   "devDependencies": {
     "electron": "^31.7.0",
