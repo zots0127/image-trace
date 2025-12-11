@@ -3,7 +3,7 @@ name: desktop-build
 on:
   push:
     branches:
-      - desktop-local
+      - main
     tags:
       - "v*"
   workflow_dispatch:

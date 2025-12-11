@@ -44,6 +44,23 @@ npm install
 npm run dev
 ```
 
+#### macOS 权限与“已损坏”提示处理
+
+- 首次运行若被 Gatekeeper 拦截或提示“已损坏”，可在 Finder 里右键应用选择“打开”并确认一次，或在“系统设置 -> 隐私与安全性”中允许该应用运行。
+- 如仍被隔离，可移除下载隔离属性：
+
+```bash
+xattr -r -d com.apple.quarantine "/Applications/Image Trace.app"  # 或对应安装路径
+```
+
+- 若因权限导致可执行文件无法启动，可授予执行权限：
+
+```bash
+chmod +x "/Applications/Image Trace.app/Contents/MacOS/Image Trace"
+```
+
+- 遇到端口占用或长时间“启动后端”停滞，可重试或在菜单/设置中选择“重新启动后端”，确保 127.0.0.1:8000 未被其他进程占用。
+
 ## API接口
 
 ### 项目管理
