@@ -74,14 +74,14 @@ jobs:
         run: |
           node -e "const fs=require('fs');fs.rmSync('backend_bin',{recursive:true,force:true});fs.rmSync('dist',{recursive:true,force:true});"
           npm run dist:pyinstaller
-          node -e "const fs=require('fs');fs.rmSync('dist-pyinstaller',{recursive:true,force:true});fs.rmSync('backend_bin_py',{recursive:true,force:true});fs.cpSync('dist','dist-pyinstaller',{recursive:true});fs.cpSync('backend_bin','backend_bin_py',{recursive:true});"
+          node -e "const fs=require('fs');const copy=(src,dst)=>{if(fs.existsSync(src))fs.cpSync(src,dst,{recursive:true});};fs.rmSync('dist-pyinstaller',{recursive:true,force:true});fs.rmSync('backend_bin_py',{recursive:true,force:true});copy('dist','dist-pyinstaller');copy('backend_bin','backend_bin_py');"
 
       - name: Build desktop app (Nuitka)
         working-directory: desktop
         run: |
           node -e "const fs=require('fs');fs.rmSync('backend_bin',{recursive:true,force:true});fs.rmSync('dist',{recursive:true,force:true});"
           npm run dist:nuitka
-          node -e "const fs=require('fs');fs.rmSync('dist-nuitka',{recursive:true,force:true});fs.rmSync('backend_bin_nuitka',{recursive:true,force:true});fs.cpSync('dist','dist-nuitka',{recursive:true});fs.cpSync('backend_bin','backend_bin_nuitka',{recursive:true});"
+          node -e "const fs=require('fs');const copy=(src,dst)=>{if(fs.existsSync(src))fs.cpSync(src,dst,{recursive:true});};fs.rmSync('dist-nuitka',{recursive:true,force:true});fs.rmSync('backend_bin_nuitka',{recursive:true,force:true});copy('dist','dist-nuitka');copy('backend_bin','backend_bin_nuitka');"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
