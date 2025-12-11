@@ -54,9 +54,13 @@ trap "cleanup; exit 0" INT TERM
 trap cleanup EXIT
 
 info "启动内置后端 (127.0.0.1:8000)"
+BACKEND_EXE="${ROOT}/desktop/backend_bin/image-trace-backend-pyinstaller"
+if [[ -x "${ROOT}/desktop/backend_bin/image-trace-backend-nuitka" ]]; then
+  BACKEND_EXE="${ROOT}/desktop/backend_bin/image-trace-backend-nuitka"
+fi
 (
   cd "${ROOT}"
-  ./desktop/backend_bin/image-trace-backend
+  "${BACKEND_EXE}"
 ) &
 BACKEND_PID=$!
 sleep 2

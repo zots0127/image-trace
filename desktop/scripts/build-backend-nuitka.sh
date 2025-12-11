@@ -42,7 +42,7 @@ fi
 
 mkdir -p "${OUT_DIR}"
 
-BASE_NAME="image-trace-backend"
+BASE_NAME="image-trace-backend-nuitka"
 EXE_NAME="${BASE_NAME}"
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
   EXE_NAME="${BASE_NAME}.exe"

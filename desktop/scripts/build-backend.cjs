@@ -73,7 +73,8 @@ console.log('[build-backend] using', py);
 // 然后再运行本脚本。
 run(py, ['-m', 'PyInstaller', '--version'], backendDir);
 
-const baseName = 'image-trace-backend';
+// 使用 PyInstaller 生成的后端二进制，名称明确标记编译方式
+const baseName = 'image-trace-backend-pyinstaller';
 const exeName = process.platform === 'win32' ? `${baseName}.exe` : baseName;
 
 run(py, [

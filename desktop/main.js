@@ -22,17 +22,47 @@ function getRuntimeLogPath() {
   return path.join(getRuntimeDir(), 'backend.log');
 }
 
-function getBackendExeName() {
-  return process.platform === 'win32' ? 'image-trace-backend.exe' : 'image-trace-backend';
+function getBackendBinaryDir() {
+  // 打包后：extraResources -> process.resourcesPath/backend_bin/<exe>
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'backend_bin')
+    : path.join(__dirname, 'backend_bin');
 }
 
-function getBackendBinaryPath() {
-  // 打包后：extraResources -> process.resourcesPath/backend_bin/<exe>
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'backend_bin', getBackendExeName());
+function resolveBackendBinary() {
+  const suffix = process.platform === 'win32' ? '.exe' : '';
+  const dir = getBackendBinaryDir();
+  const variants = [
+    { flavor: 'nuitka', filename: `image-trace-backend-nuitka${suffix}` },
+    { flavor: 'pyinstaller', filename: `image-trace-backend-pyinstaller${suffix}` },
+    { flavor: 'legacy', filename: `image-trace-backend${suffix}` }, // 兼容旧名称
+  ];
+
+  const preferred = (process.env.IMAGE_TRACE_BACKEND_FLAVOR || '').toLowerCase();
+  let ordered = variants;
+  if (preferred) {
+    const idx = variants.findIndex((v) => v.flavor === preferred);
+    if (idx >= 0) {
+      ordered = [variants[idx], ...variants.filter((_, i) => i !== idx)];
+    }
   }
-  // 开发：优先使用 PyInstaller 生成物；没有就回退到 python 启动
-  return path.join(__dirname, 'backend_bin', getBackendExeName());
+
+  const tried = [];
+  for (const v of ordered) {
+    const full = path.join(dir, v.filename);
+    tried.push(full);
+    if (fs.existsSync(full)) {
+      return { path: full, flavor: v.flavor, tried, missing: false };
+    }
+  }
+
+  // 未找到，返回第一个候选路径用于提示
+  return {
+    path: path.join(dir, ordered[0].filename),
+    flavor: ordered[0].flavor,
+    tried,
+    missing: true,
+  };
 }
 
 async function ensureRuntimeDirs() {
@@ -142,10 +172,11 @@ async function startBackendInternal() {
     IMAGE_TRACE_LOG_LEVEL: 'info',
   };
 
-  const exePath = getBackendBinaryPath();
+  const resolvedBinary = resolveBackendBinary();
+  const exePath = resolvedBinary.path;
   let child;
 
-  if (fs.existsSync(exePath)) {
+  if (!resolvedBinary.missing && fs.existsSync(exePath)) {
     // mac/linux: 确保可执行权限（有些打包链路会丢失 chmod）
     if (process.platform !== 'win32') {
       try {
@@ -156,7 +187,10 @@ async function startBackendInternal() {
     }
     child = spawn(exePath, [], {
       cwd: getRuntimeDir(),
-      env,
+      env: {
+        ...env,
+        IMAGE_TRACE_BACKEND_FLAVOR: resolvedBinary.flavor,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     backendManaged = true;
@@ -183,7 +217,10 @@ async function startBackendInternal() {
     });
     backendManaged = true;
   } else {
-    throw new Error(`内置后端可执行文件不存在：${exePath}`);
+    const tried = resolvedBinary.tried && resolvedBinary.tried.length
+      ? resolvedBinary.tried.join(', ')
+      : exePath;
+    throw new Error(`内置后端可执行文件不存在，已尝试：${tried}`);
   }
 
   child.stdout.on('data', (d) => logStream.write(d));
