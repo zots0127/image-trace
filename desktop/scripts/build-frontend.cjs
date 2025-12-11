@@ -18,10 +18,19 @@ function run(cmd, args, cwd, env) {
 
 // 1) 构建前端
 const apiBase = process.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-run(npmCmd, ['run', 'build'], uiDir, {
-  ...process.env,
-  VITE_API_BASE_URL: apiBase,
-});
+const npmExecPath = process.env.npm_execpath;
+if (npmExecPath) {
+  // 当脚本由 npm run dist 调用时，npm_execpath 指向 npm-cli.js，跨平台最稳
+  run(process.execPath, [npmExecPath, 'run', 'build'], uiDir, {
+    ...process.env,
+    VITE_API_BASE_URL: apiBase,
+  });
+} else {
+  run(npmCmd, ['run', 'build'], uiDir, {
+    ...process.env,
+    VITE_API_BASE_URL: apiBase,
+  });
+}
 
 // 2) 清空旧 renderer 并复制 dist
 fs.rmSync(outDir, { recursive: true, force: true });

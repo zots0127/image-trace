@@ -63,6 +63,12 @@ jobs:
         run: |
           npm install
 
+      - name: Fix app-builder permission (Linux)
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: |
+          chmod +x node_modules/app-builder-bin/linux/x64/app-builder || true
+
       - name: Build desktop app
         working-directory: desktop
         run: |
