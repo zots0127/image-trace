@@ -29,23 +29,34 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            ui/package-lock.json
+            desktop/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend_simplified/requirements.txt
 
       - name: Linux deps (AppImage)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2
+          sudo apt-get install -y libfuse2 libgl1 libglib2.0-0
 
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install -r backend_simplified/requirements.txt
           pip install pyinstaller
+
+      - name: Install UI deps
+        working-directory: ui
+        run: |
+          npm install
 
       - name: Install desktop deps
         working-directory: desktop
@@ -63,3 +74,30 @@ jobs:
           name: image-trace-desktop-${{ runner.os }}
           path: |
             desktop/dist/**
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*latest*.yml
+            artifacts/**/*.blockmap
