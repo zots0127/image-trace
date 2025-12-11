@@ -2,10 +2,12 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { ArrowRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 const LandingPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { t } = useTranslation();
 
   const handleGetStarted = () => {
     if (user) {
@@ -27,17 +29,17 @@ const LandingPage = () => {
       <main className="flex-1 flex items-center justify-center px-6">
         <div className="text-center max-w-2xl mx-auto relative z-10">
           <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-foreground mb-6">
-            追溯图片的数字足迹
+            {t("common.landingHero")}
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground mb-10">
-            AI 驱动的图像溯源分析
+            {t("common.landingSub")}
           </p>
           <Button 
             size="lg" 
             onClick={handleGetStarted}
             className="h-12 px-8 text-base font-medium gap-2 group"
           >
-            立即体验
+            {t("common.landingCta")}
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
           </Button>
         </div>
@@ -45,7 +47,7 @@ const LandingPage = () => {
 
       {/* Minimal footer */}
       <footer className="py-6 text-center text-sm text-muted-foreground relative z-10">
-        <p>© 2024 ImageTrace. All rights reserved.</p>
+        <p>© 2024 ImageTrace. {t("common.footerRights")}</p>
       </footer>
     </div>
   );

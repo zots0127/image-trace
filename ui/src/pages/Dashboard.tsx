@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getProjects, deleteProject, type Project } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,6 +17,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const loadProjects = async () => {
     setLoading(true);
@@ -28,8 +30,8 @@ export default function Dashboard() {
       console.error("加载项目列表失败:", error);
       const err = error as APIError;
       toast({
-        title: "加载失败",
-        description: err.message || "无法连接到后端服务",
+        title: t("common.loadFailed"),
+        description: err.message || t("common.loadFailedDesc"),
         variant: "destructive",
         action: (
           <Button
@@ -39,12 +41,12 @@ export default function Dashboard() {
             onClick={async () => {
               const success = await copyErrorToClipboard(err);
               if (success) {
-                toast({ title: "已复制错误详情" });
+                toast({ title: t("common.copy") });
               }
             }}
           >
             <Copy className="h-3 w-3 mr-1" />
-            复制
+            {t("common.copy")}
           </Button>
         ),
       });
@@ -68,14 +70,14 @@ export default function Dashboard() {
     try {
       await deleteProject(projectId);
       toast({
-        title: "项目已删除",
-        description: "项目及其所有数据已被删除",
+        title: t("common.deleted"),
+        description: t("common.deleteDesc"),
       });
       loadProjects();
     } catch (error) {
       const err = error as APIError;
       toast({
-        title: "删除失败",
+        title: t("common.deleteFailed"),
         description: err.message,
         variant: "destructive",
         action: (
@@ -86,12 +88,12 @@ export default function Dashboard() {
             onClick={async () => {
               const success = await copyErrorToClipboard(err);
               if (success) {
-                toast({ title: "已复制错误详情" });
+                toast({ title: t("common.copy") });
               }
             }}
           >
             <Copy className="h-3 w-3 mr-1" />
-            复制
+            {t("common.copy")}
           </Button>
         ),
       });
@@ -107,7 +109,7 @@ export default function Dashboard() {
         <div className="container mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-foreground">图片溯源分析系统</h1>
+              <h1 className="text-3xl font-bold text-foreground">{t("common.appName")}</h1>
               <p className="text-muted-foreground mt-1">
                 {user?.email}
               </p>
@@ -121,14 +123,14 @@ export default function Dashboard() {
                 className="gap-2"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-                刷新
+                {t("common.refresh")}
               </Button>
               <div id="create-project-btn">
                 <CreateProjectDialog onProjectCreated={loadProjects} />
               </div>
               <Button variant="outline" size="sm" onClick={signOut}>
                 <LogOut className="h-4 w-4 mr-2" />
-                退出
+                {t("common.logout")}
               </Button>
             </div>
           </div>
@@ -146,8 +148,8 @@ export default function Dashboard() {
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
             <FolderOpen className="h-16 w-16 text-muted-foreground/50 mb-4" />
-            <h2 className="text-2xl font-semibold mb-2">暂无项目</h2>
-            <p className="text-muted-foreground mb-6">创建您的第一个项目开始分析图片</p>
+            <h2 className="text-2xl font-semibold mb-2">{t("common.noProjects")}</h2>
+            <p className="text-muted-foreground mb-6">{t("common.createFirst")}</p>
             <CreateProjectDialog onProjectCreated={loadProjects} />
           </div>
         ) : (
