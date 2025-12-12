@@ -39,11 +39,33 @@ jobs:
           cache: pip
           cache-dependency-path: backend_simplified/requirements.txt
 
-      - name: Linux deps (AppImage)
+      - name: Cache Nuitka & Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Nuitka
+            ~/Library/Caches/Nuitka
+            ~\AppData\Local\Nuitka\Nuitka
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~\AppData\Local\electron\Cache
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron-builder
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-build-cache-${{ hashFiles('backend_simplified/requirements.txt', 'desktop/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-
+
+      - name: Linux deps (AppImage & ccache)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 libgl1 libglib2.0-0
+          sudo apt-get install -y libfuse2 libgl1 libglib2.0-0 ccache
+
+      - name: macOS deps (ccache)
+        if: runner.os == 'macOS'
+        run: brew install ccache
+
 
       - name: Install Python deps
         run: |
