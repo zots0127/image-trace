@@ -111,6 +111,29 @@ jobs:
         if: steps.build_pyinstaller.outcome == 'failure' && steps.build_nuitka.outcome == 'failure'
         run: exit 1
 
+      - name: Rename backend binaries (avoid conflicts)
+        run: |
+          # Rename PyInstaller binary
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            mv desktop/backend_bin_py/image-trace-backend-pyinstaller.exe desktop/backend_bin_py/image-trace-backend-pyinstaller-${{ runner.os }}.exe
+          else
+            mv desktop/backend_bin_py/image-trace-backend-pyinstaller desktop/backend_bin_py/image-trace-backend-pyinstaller-${{ runner.os }}
+          fi
+
+          # Rename Nuitka binary (if exists)
+          if [ -d "desktop/backend_bin_nuitka" ]; then
+            if [ "${{ runner.os }}" == "Windows" ]; then
+              if [ -f "desktop/backend_bin_nuitka/image-trace-backend-nuitka.exe" ]; then
+                mv desktop/backend_bin_nuitka/image-trace-backend-nuitka.exe desktop/backend_bin_nuitka/image-trace-backend-nuitka-${{ runner.os }}.exe
+              fi
+            else
+              if [ -f "desktop/backend_bin_nuitka/image-trace-backend-nuitka" ]; then
+                mv desktop/backend_bin_nuitka/image-trace-backend-nuitka desktop/backend_bin_nuitka/image-trace-backend-nuitka-${{ runner.os }}
+              fi
+            fi
+          fi
+        shell: bash
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -156,5 +179,5 @@ jobs:
             artifacts/**/dist-nuitka/**/*.rpm
             artifacts/**/dist-nuitka/**/*latest*.yml
             artifacts/**/dist-nuitka/**/*.blockmap
-            artifacts/**/backend_bin_py/**
-            artifacts/**/backend_bin_nuitka/**
+            artifacts/**/backend_bin_py/*
+            artifacts/**/backend_bin_nuitka/*
