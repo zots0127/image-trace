@@ -2,7 +2,7 @@
   "name": "image-trace-desktop",
   "productName": "Image Trace",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {

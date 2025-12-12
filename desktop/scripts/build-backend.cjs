@@ -87,6 +87,20 @@ run(py, [
   '--workpath', workDir,
   '--specpath', specDir,
   '--paths', backendDir,
+  // 增加常见隐式导入，防止 PyInstaller 漏掉 uvicorn/fastapi/cv2 等依赖
+  '--hidden-import', 'uvicorn.logging',
+  '--hidden-import', 'uvicorn.loops',
+  '--hidden-import', 'uvicorn.loops.auto',
+  '--hidden-import', 'uvicorn.protocols',
+  '--hidden-import', 'uvicorn.protocols.http',
+  '--hidden-import', 'uvicorn.protocols.http.auto',
+  '--hidden-import', 'uvicorn.lifespan',
+  '--hidden-import', 'uvicorn.lifespan.on',
+  '--hidden-import', 'engineio.async_drivers.asgi', // often needed for socketio/engineio if used, safe to add
+  '--collect-all', 'cv2',
+  '--collect-all', 'fitz',
+  '--collect-all', 'imagehash',
+  '--collect-all', 'sqlmodel',
   entry,
 ], backendDir);
 
