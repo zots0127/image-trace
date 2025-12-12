@@ -93,7 +93,6 @@ const args = [
   "--include-package=sqlmodel",
   "--include-package=uvicorn",
   "--include-package=fastapi",
-  "--include-package=python_multipart",
   `--include-data-files=${toPosix(path.join(backendDir, "app", "*.py"))}=app/`,
   "--nofollow-import-to=tests",
   ...existingTxtGlobs(),
