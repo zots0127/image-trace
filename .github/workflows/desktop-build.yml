@@ -52,9 +52,9 @@ jobs:
             ~/.cache/electron-builder
             ~/Library/Caches/electron-builder
             ~\AppData\Local\electron-builder\Cache
-          key: ${{ runner.os }}-build-cache-${{ hashFiles('backend_simplified/requirements.txt', 'desktop/package-lock.json') }}
+          key: ${{ runner.os }}-build-cache-v2-${{ hashFiles('backend_simplified/requirements.txt', 'desktop/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-build-cache-
+            ${{ runner.os }}-build-cache-v2-
 
       - name: Linux deps (AppImage & ccache)
         if: runner.os == 'Linux'
@@ -88,6 +88,13 @@ jobs:
         working-directory: desktop
         run: |
           chmod +x node_modules/app-builder-bin/linux/x64/app-builder || true
+
+      - name: Download VC++ Redistributable (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir desktop/build -ErrorAction SilentlyContinue
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "desktop/build/vc_redist.x64.exe"
+        shell: powershell
 
       - name: Build desktop app (PyInstaller)
         id: build_pyinstaller

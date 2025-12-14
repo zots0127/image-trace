@@ -12,8 +12,8 @@
     "build:backend:nuitka": "node scripts/build-backend-nuitka.cjs",
     "pack": "electron-builder --dir",
     "dist": "npm run dist:pyinstaller",
-    "dist:pyinstaller": "npm run build:frontend && npm run build:backend && electron-builder --publish never -c.artifactName=\"\\${productName}-PyInstaller-\\${version}-\\${os}-\\${arch}.\\${ext}\"",
-    "dist:nuitka": "npm run build:frontend && npm run build:backend:nuitka && electron-builder --publish never -c.artifactName=\"\\${productName}-Nuitka-\\${version}-\\${os}-\\${arch}.\\${ext}\""
+    "dist:pyinstaller": "npm run build:frontend && npm run build:backend && node scripts/build-dist.cjs pyinstaller",
+    "dist:nuitka": "npm run build:frontend && npm run build:backend:nuitka && node scripts/build-dist.cjs nuitka"
   },
   "devDependencies": {
     "electron": "^31.7.0",
@@ -42,6 +42,12 @@
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh"
     },
     "linux": {
       "target": [
