@@ -89,6 +89,12 @@ jobs:
         run: |
           chmod +x node_modules/app-builder-bin/linux/x64/app-builder || true
 
+      - name: Create dummy VC++ redist (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p desktop/build
+          touch desktop/build/vc_redist.x64.exe
+
       - name: Download VC++ Redistributable (Windows)
         if: runner.os == 'Windows'
         run: |
