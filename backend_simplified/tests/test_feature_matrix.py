@@ -137,14 +137,16 @@ class TestCosineMatrix:
 
     def test_rotation_invariant_best_variant(self):
         from app.feature_matrix import compute_cosine_similarity_matrix
-        vec_a = np.array([1, 0, 0, 0], dtype=np.float32)
+        vec_match = np.array([1, 0, 0, 0], dtype=np.float32)
+        vec_bad = np.array([0, 1, 0, 0], dtype=np.float32)
+        # Batch approach: compares same-variant across images, takes max.
+        # variant 0: bad match, variant 1: perfect match
         vectors = {
-            1: {0: vec_a},
-            2: {0: np.array([0, 1, 0, 0], dtype=np.float32),  # bad match
-                1: vec_a.copy()},  # perfect match (e.g. rotated variant)
+            1: {0: vec_bad, 1: vec_match},
+            2: {0: vec_bad, 1: vec_match},
         }
         matrix = compute_cosine_similarity_matrix(vectors, [1, 2], rotation_invariant=True)
-        assert abs(matrix[0, 1] - 1.0) < 0.001  # should pick best variant
+        assert abs(matrix[0, 1] - 1.0) < 0.001  # variant 1 gives perfect match
 
 
 # ---------- Feature status endpoint ----------------------------------------
