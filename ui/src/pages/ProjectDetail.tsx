@@ -56,6 +56,8 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [pairwiseData, setPairwiseData] = useState<PairwiseMatrixResult | null>(null);
+  const [allPairwise, setAllPairwise] = useState<Record<string, PairwiseMatrixResult>>({});
+  const [selectedAlgo, setSelectedAlgo] = useState<HashType>("phash");
   const [loadingPairwise, setLoadingPairwise] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [featureStatus, setFeatureStatus] = useState<FeatureStatus | null>(null);
@@ -167,19 +169,39 @@ export default function ProjectDetail() {
     return labels[algo] || algo;
   };
 
+  const ALL_ALGOS: HashType[] = ["phash", "dhash", "ahash", "whash", "ssim", "histogram", "sift", "orb", "brisk", "akaze", "kaze"];
+
   const handleAnalyze = async (algo: HashType, rotationInvariant: boolean = false) => {
     if (!projectId) return;
     setAnalyzing(true);
     try {
-      setLastAlgo(algo);
-      const res = await analyzeImages(projectId, algo, 0.85, rotationInvariant);
+      // Run analysis with auto to get grouping result
+      const res = await analyzeImages(projectId, "auto", 0.85, rotationInvariant);
       setCompareResult(res);
-      // Also fetch pairwise matrix
+      setLastAlgo("auto");
+
+      // Fetch ALL pairwise matrices in parallel
       setLoadingPairwise(true);
-      getPairwiseMatrix(projectId, algo)
-        .then(setPairwiseData)
-        .catch(() => { })
-        .finally(() => setLoadingPairwise(false));
+      const results: Record<string, PairwiseMatrixResult> = {};
+      const promises = ALL_ALGOS.map(async (a) => {
+        try {
+          const data = await getPairwiseMatrix(projectId, a);
+          results[a] = data;
+        } catch {
+          // skip failed
+        }
+      });
+      await Promise.all(promises);
+      setAllPairwise(results);
+      // Set first available as active
+      const firstAlgo = ALL_ALGOS.find(a => results[a]) || "phash";
+      setSelectedAlgo(firstAlgo);
+      setPairwiseData(results[firstAlgo] || null);
+      setLoadingPairwise(false);
+
+      // Refresh feature status
+      getFeatureStatus(projectId).then(setFeatureStatus).catch(() => { });
+
       toast({ title: t("project.analyzeSuccess"), description: t("project.analyzeSuccessDesc", { total: res.total_images, groups: res.groups.length }) });
       loadRuns();
     } catch (error) {
@@ -452,7 +474,7 @@ export default function ProjectDetail() {
                 <span>{t("project.statsTotal", { count: compareResult.total_images })}</span>
                 <span>{t("project.statsGroups", { count: compareResult.groups.length })}</span>
                 <span>{t("project.statsUnique", { count: compareResult.unique_images.length })}</span>
-                <span>{t("project.statsAlgo", { algo: lastAlgo })}</span>
+                <span>{t("project.statsAlgo", { algo: "All (11 algorithms)" })}</span>
                 <span className="flex items-center gap-2">
                   {t("project.statsMatchAlgo")}
                   <select
@@ -506,6 +528,30 @@ export default function ProjectDetail() {
                         />
                       </div>
                       <p className="text-xs text-white/40 mt-1">Feature matrix precomputation in progress...</p>
+                    </div>
+                  )}
+                  {/* Algorithm Tabs */}
+                  {Object.keys(allPairwise).length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs text-muted-foreground mb-2">Switch algorithm view:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ALL_ALGOS.filter(a => allPairwise[a]).map((algo) => (
+                          <button
+                            key={algo}
+                            onClick={() => {
+                              setSelectedAlgo(algo);
+                              setPairwiseData(allPairwise[algo]);
+                            }}
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${selectedAlgo === algo
+                                ? 'bg-primary text-primary-foreground shadow-sm'
+                                : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                              }`}
+                          >
+                            {getAlgorithmLabel(algo)}
+                            {allPairwise[algo]?.engine === 'matrix' && ' ⚡'}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {pairwiseData && pairwiseData.matrix.length > 0 ? (
