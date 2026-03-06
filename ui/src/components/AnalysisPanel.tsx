@@ -117,7 +117,7 @@ export function AnalysisPanel({ projectId, hasImages, onAnalyze, loading }: Anal
           size="lg"
         >
           <Play className="h-4 w-4" />
-          {loading ? "Analyzing All Algorithms..." : "Run Full Analysis"}
+          {loading ? "Analyzing..." : "Analysis"}
         </Button>
 
         {!hasImages && (
