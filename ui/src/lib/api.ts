@@ -488,6 +488,7 @@ export interface PairwiseMatrixResult {
   image_ids: number[];
   matrix: number[][];
   algorithm: string;
+  engine?: "matrix" | "legacy";
 }
 
 export const getPairwiseMatrix = async (
@@ -551,3 +552,36 @@ export const getMatchData = async (
 };
 
 export { toThumbnailUrl };
+
+// System Info
+export interface SystemInfo {
+  faiss_available: boolean;
+  faiss_type: "CPU" | "GPU" | null;
+  engines: string[];
+  algorithms: string[];
+  feature_types: string[];
+}
+
+export const getSystemInfo = async (): Promise<SystemInfo> => {
+  const response = await fetch(`${API_BASE_URL}/system_info`);
+  if (!response.ok) throw new Error("Failed to get system info");
+  return response.json();
+};
+
+// Feature Status
+export interface FeatureStatus {
+  project_id: number;
+  total: number;
+  ready: number;
+  all_ready: boolean;
+  images: Array<{ id: number; filename: string; status: string }>;
+}
+
+export const getFeatureStatus = async (projectId: string): Promise<FeatureStatus> => {
+  const response = await fetch(`${API_BASE_URL}/feature_status/${projectId}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error("Failed to get feature status");
+  return response.json();
+};
+

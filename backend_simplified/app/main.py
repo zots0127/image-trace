@@ -646,6 +646,20 @@ async def feature_status(
     }
 
 
+@app.get("/system_info")
+async def system_info():
+    """Return system capabilities: FAISS availability, supported engines, algorithms."""
+    from app.feature_matrix import _HAS_FAISS, ALL_FEATURES, FEATURE_TO_ALGO
+    return {
+        "faiss_available": _HAS_FAISS,
+        "faiss_type": "GPU" if _HAS_FAISS and hasattr(__import__('faiss'), 'StandardGpuResources') else ("CPU" if _HAS_FAISS else None),
+        "engines": ["matrix", "legacy"],
+        "algorithms": list(ALL_ALGOS),
+        "feature_types": ALL_FEATURES,
+        "feature_to_algo": FEATURE_TO_ALGO,
+    }
+
+
 @app.get("/images/{project_id}")
 async def list_project_images(
     project_id: int,

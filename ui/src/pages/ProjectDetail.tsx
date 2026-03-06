@@ -10,12 +10,16 @@ import {
   getPairwiseMatrix,
   getAnalysisRuns,
   getAnalysisRunDetail,
+  getSystemInfo,
+  getFeatureStatus,
   type Project,
   type Image,
   type AnalysisResult,
   type HashType,
   type AnalysisRun,
   type PairwiseMatrixResult,
+  type SystemInfo,
+  type FeatureStatus,
 } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
 import { ImageUploadZone } from "@/components/ImageUploadZone";
@@ -53,6 +57,8 @@ export default function ProjectDetail() {
   const [analyzing, setAnalyzing] = useState(false);
   const [pairwiseData, setPairwiseData] = useState<PairwiseMatrixResult | null>(null);
   const [loadingPairwise, setLoadingPairwise] = useState(false);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [featureStatus, setFeatureStatus] = useState<FeatureStatus | null>(null);
   const locale = i18n.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 
   const loadProject = useCallback(async () => {
@@ -124,7 +130,12 @@ export default function ProjectDetail() {
     loadProject();
     prefetchResult();
     loadRuns();
-  }, [loadProject, prefetchResult, loadRuns]);
+    // Load system info and feature status
+    getSystemInfo().then(setSystemInfo).catch(() => { });
+    if (projectId) {
+      getFeatureStatus(projectId).then(setFeatureStatus).catch(() => { });
+    }
+  }, [loadProject, prefetchResult, loadRuns, projectId]);
 
   const handleImagesUploaded = (uploadedImages: Image[]) => {
     setImages((prev) => [...prev, ...uploadedImages]);
@@ -464,6 +475,44 @@ export default function ProjectDetail() {
               </div>
               {showAdvanced && (
                 <>
+                  {/* Engine & Feature Status Badges */}
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    {pairwiseData?.engine && (
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${pairwiseData.engine === 'matrix'
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                        }`}>
+                        {pairwiseData.engine === 'matrix' ? '⚡' : '🔄'}
+                        {pairwiseData.engine === 'matrix' ? 'Matrix Engine' : 'Legacy Engine'}
+                      </span>
+                    )}
+                    {systemInfo?.faiss_available && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                        🚀 FAISS {systemInfo.faiss_type}
+                      </span>
+                    )}
+                    {featureStatus && (
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${featureStatus.all_ready
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-orange-500/15 text-orange-400 border border-orange-500/30'
+                        }`}>
+                        {featureStatus.all_ready ? '✅' : '⏳'}
+                        {featureStatus.ready}/{featureStatus.total} Features Ready
+                      </span>
+                    )}
+                  </div>
+                  {/* Feature precomputation progress bar */}
+                  {featureStatus && !featureStatus.all_ready && featureStatus.total > 0 && (
+                    <div className="mb-3">
+                      <div className="w-full bg-white/5 rounded-full h-1.5">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-emerald-400 h-1.5 rounded-full transition-all duration-500"
+                          style={{ width: `${(featureStatus.ready / featureStatus.total) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-white/40 mt-1">Feature matrix precomputation in progress...</p>
+                    </div>
+                  )}
                   {pairwiseData && pairwiseData.matrix.length > 0 ? (
                     <SimilarityMatrix matrix={pairwiseData.matrix} imageNames={pairwiseData.names} />
                   ) : similarityMatrix ? (
