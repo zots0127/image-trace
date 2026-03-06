@@ -23,6 +23,7 @@ import { DocumentUploadZone } from "@/components/DocumentUploadZone";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { SimilarityMatrix } from "@/components/SimilarityMatrix";
 import { SimilarityGraph } from "@/components/SimilarityGraph";
+import { FeatureMatchView } from "@/components/FeatureMatchView";
 import { SystemHealth } from "@/components/SystemHealth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -41,7 +42,7 @@ export default function ProjectDetail() {
   const [images, setImages] = useState<Image[]>([]);
   const [compareResult, setCompareResult] = useState<AnalysisResult | null>(null);
   const [prefetching, setPrefetching] = useState(false);
-  const [matchImage, setMatchImage] = useState<string | null>(null);
+  const [matchPair, setMatchPair] = useState<{ aId: number; bId: number; aName: string; bName: string } | null>(null);
   const [matchLoadingGroup, setMatchLoadingGroup] = useState<number | null>(null);
   const [lastAlgo, setLastAlgo] = useState<HashType>("phash");
   const [showAdvanced, setShowAdvanced] = useState(true);
@@ -462,18 +463,17 @@ export default function ProjectDetail() {
                     groups={compareResult.groups}
                     imageIds={pairwiseData?.image_ids}
                     matchAlgo={matchAlgo}
-                    onEdgeClick={async (imgAId: number, imgBId: number) => {
-                      try {
-                        const { url } = await visualizeMatch(imgAId, imgBId, matchAlgo);
-                        setMatchImage(url);
-                      } catch (error) {
-                        const err = error as APIError;
-                        toast({
-                          title: t("project.generateMatchFailed"),
-                          description: err.message,
-                          variant: "destructive",
-                        });
-                      }
+                    onEdgeClick={(imgAId: number, imgBId: number) => {
+                      // Find image names
+                      const allImgs = [...compareResult.groups.flatMap(g => g.images), ...compareResult.unique_images];
+                      const aImg = allImgs.find(i => i.id === imgAId);
+                      const bImg = allImgs.find(i => i.id === imgBId);
+                      setMatchPair({
+                        aId: imgAId,
+                        bId: imgBId,
+                        aName: aImg?.filename || `#${imgAId}`,
+                        bName: bImg?.filename || `#${imgBId}`,
+                      });
                     }}
                   />
                 </>
@@ -491,20 +491,12 @@ export default function ProjectDetail() {
                           disabled={matchLoadingGroup === g.group_id}
                           onClick={async () => {
                             const [a, b] = g.images;
-                            setMatchLoadingGroup(g.group_id);
-                            try {
-                              const { url } = await visualizeMatch(a.id, b.id, matchAlgo);
-                              setMatchImage(url);
-                            } catch (error) {
-                              const err = error as APIError;
-                              toast({
-                                title: t("project.generateMatchFailed"),
-                                description: err.message,
-                                variant: "destructive",
-                              });
-                            } finally {
-                              setMatchLoadingGroup(null);
-                            }
+                            setMatchPair({
+                              aId: a.id,
+                              bId: b.id,
+                              aName: a.filename,
+                              bName: b.filename,
+                            });
                           }}
                         >
                           {matchLoadingGroup === g.group_id ? t("project.generating") : t("project.viewMatches")}
@@ -545,20 +537,15 @@ export default function ProjectDetail() {
           </Card>
         )}
 
-        {matchImage && (
-          <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center px-4">
-            <div className="bg-background rounded-lg shadow-lg max-w-5xl w-full overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b">
-                <div className="text-sm font-medium">{t("project.matchModal")}</div>
-                <Button variant="ghost" size="sm" onClick={() => setMatchImage(null)}>
-                  {t("project.close")}
-                </Button>
-              </div>
-              <div className="p-4 max-h-[80vh] overflow-auto bg-black">
-                <img src={matchImage} alt="matches" className="mx-auto max-h-[75vh]" />
-              </div>
-            </div>
-          </div>
+        {matchPair && (
+          <FeatureMatchView
+            imageAId={matchPair.aId}
+            imageBId={matchPair.bId}
+            imageAName={matchPair.aName}
+            imageBName={matchPair.bName}
+            algorithm={matchAlgo}
+            onClose={() => setMatchPair(null)}
+          />
         )}
       </div>
     </div>

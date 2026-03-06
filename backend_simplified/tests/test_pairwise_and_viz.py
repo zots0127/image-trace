@@ -215,3 +215,82 @@ class TestDbSchemaMigration:
         import app.main as main_mod
         importlib.reload(main_mod)
         main_mod._migrate_db_schema("sqlite:////tmp/does_not_exist_12345.db")
+
+
+class TestThumbnail:
+    """Tests for GET /thumbnail/{image_id}"""
+
+    def _upload_image(self, client, pid, filename="thumb.png", color=(128, 64, 32)):
+        file_tuple = make_upload_bytes(filename, color=color)
+        resp = client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        return resp.json()["processed_images"][0]["id"]
+
+    def test_thumbnail_success(self, client):
+        resp = client.post("/projects", json={"name": "ThumbTest"})
+        pid = resp.json()["id"]
+        img_id = self._upload_image(client, pid)
+        resp = client.get(f"/thumbnail/{img_id}?size=200")
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type") == "image/jpeg"
+
+    def test_thumbnail_not_found(self, client):
+        resp = client.get("/thumbnail/9999")
+        assert resp.status_code == 404
+
+    def test_thumbnail_caching(self, client):
+        resp = client.post("/projects", json={"name": "ThumbCache"})
+        pid = resp.json()["id"]
+        img_id = self._upload_image(client, pid)
+        # First call creates thumbnail
+        resp1 = client.get(f"/thumbnail/{img_id}")
+        assert resp1.status_code == 200
+        # Second call uses cache
+        resp2 = client.get(f"/thumbnail/{img_id}")
+        assert resp2.status_code == 200
+
+
+class TestMatchData:
+    """Tests for POST /match_data"""
+
+    def _setup_pair(self, client):
+        resp = client.post("/projects", json={"name": "MatchData"})
+        pid = resp.json()["id"]
+        ids = []
+        for name, color in [("md_a.png", (200, 50, 50)), ("md_b.png", (50, 200, 50))]:
+            file_tuple = make_upload_bytes(name, size=(200, 200), color=color)
+            client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        images = client.get(f"/images/{pid}").json()
+        return images[0]["id"], images[1]["id"]
+
+    def test_match_data_success(self, client):
+        a_id, b_id = self._setup_pair(client)
+        resp = client.post("/match_data", data={
+            "image_a_id": str(a_id),
+            "image_b_id": str(b_id),
+            "hash_type": "orb",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "image_a" in data
+        assert "image_b" in data
+        assert "matches" in data
+        assert "score" in data
+        assert data["image_a"]["width"] > 0
+
+    def test_match_data_invalid_algo(self, client):
+        a_id, b_id = self._setup_pair(client)
+        resp = client.post("/match_data", data={
+            "image_a_id": str(a_id),
+            "image_b_id": str(b_id),
+            "hash_type": "phash",
+        })
+        assert resp.status_code == 400
+
+    def test_match_data_not_found(self, client):
+        resp = client.post("/match_data", data={
+            "image_a_id": "9999",
+            "image_b_id": "9998",
+            "hash_type": "sift",
+        })
+        assert resp.status_code == 404
+

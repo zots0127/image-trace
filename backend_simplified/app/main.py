@@ -641,6 +641,165 @@ async def delete_image(
     return {"message": "图像已删除"}
 
 
+@app.get("/thumbnail/{image_id}")
+async def get_thumbnail(
+    image_id: int,
+    size: int = 400,
+    session: Session = Depends(get_db)
+):
+    """
+    Return a browser-friendly JPEG thumbnail for any image (including TIF/RAW).
+    Caches the result in data/thumbnails/.
+    """
+    image = session.get(Image, image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    fp = image.file_path or ""
+    if fp.startswith("data/"):
+        fp = fp[len("data/"):]
+    src_path = STATIC_DIR / fp
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found")
+
+    # Cache directory
+    thumb_dir = STATIC_DIR / "thumbnails"
+    thumb_dir.mkdir(exist_ok=True)
+    thumb_path = thumb_dir / f"{image_id}_{size}.jpg"
+
+    if not thumb_path.exists():
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(str(src_path))
+            img = img.convert("RGB")
+            img.thumbnail((size, size), PILImage.LANCZOS)
+            img.save(str(thumb_path), "JPEG", quality=85)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Thumbnail generation failed: {e}")
+
+    return FileResponse(
+        path=thumb_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.post("/match_data")
+async def get_match_data(
+    image_a_id: int = Form(...),
+    image_b_id: int = Form(...),
+    hash_type: str = Form(default="sift"),
+    session: Session = Depends(get_db)
+):
+    """
+    Return keypoint coordinates and match lines as JSON for frontend SVG rendering.
+    Response: {
+      image_a: { width, height, keypoints: [{x, y}] },
+      image_b: { width, height, keypoints: [{x, y}] },
+      matches: [{a_idx, b_idx, distance}],
+      score: float
+    }
+    """
+    import cv2
+    import numpy as np
+
+    descriptor_algos = ['orb', 'brisk', 'sift', 'akaze', 'kaze']
+    if hash_type not in descriptor_algos:
+        raise HTTPException(status_code=400, detail=f"Supports: {', '.join(descriptor_algos)}")
+
+    img_a = session.get(Image, image_a_id)
+    img_b = session.get(Image, image_b_id)
+    if not img_a or not img_b:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    def resolve(fp):
+        if fp and fp.startswith("data/"):
+            fp = fp[len("data/"):]
+        return str(STATIC_DIR / (fp or ""))
+
+    path_a, path_b = resolve(img_a.file_path), resolve(img_b.file_path)
+    if not os.path.exists(path_a) or not os.path.exists(path_b):
+        raise HTTPException(status_code=404, detail="Image file not found")
+
+    try:
+        im_a = cv2.imread(path_a)
+        im_b = cv2.imread(path_b)
+        if im_a is None or im_b is None:
+            raise HTTPException(status_code=500, detail="Failed to read image")
+
+        gray_a = cv2.cvtColor(im_a, cv2.COLOR_BGR2GRAY)
+        gray_b = cv2.cvtColor(im_b, cv2.COLOR_BGR2GRAY)
+
+        # Create detector
+        algo = hash_type.lower()
+        if algo == "sift":
+            detector = cv2.SIFT_create()
+        elif algo == "orb":
+            detector = cv2.ORB_create(nfeatures=500)
+        elif algo == "brisk":
+            detector = cv2.BRISK_create()
+        elif algo == "akaze":
+            detector = cv2.AKAZE_create()
+        elif algo == "kaze":
+            detector = cv2.KAZE_create()
+        else:
+            detector = cv2.ORB_create()
+
+        kp_a, desc_a = detector.detectAndCompute(gray_a, None)
+        kp_b, desc_b = detector.detectAndCompute(gray_b, None)
+
+        if desc_a is None or desc_b is None or len(desc_a) == 0 or len(desc_b) == 0:
+            return {
+                "image_a": {"width": im_a.shape[1], "height": im_a.shape[0], "keypoints": []},
+                "image_b": {"width": im_b.shape[1], "height": im_b.shape[0], "keypoints": []},
+                "matches": [],
+                "score": 0.0,
+            }
+
+        # Match
+        if algo in ("sift", "kaze"):
+            bf = cv2.BFMatcher(cv2.NORM_L2)
+        else:
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+
+        raw_matches = bf.knnMatch(desc_a, desc_b, k=2)
+        good = []
+        for m_pair in raw_matches:
+            if len(m_pair) == 2:
+                m, n = m_pair
+                if m.distance < 0.75 * n.distance:
+                    good.append(m)
+
+        # Sort by distance, take top 50
+        good.sort(key=lambda x: x.distance)
+        good = good[:50]
+
+        score = len(good) / max(len(kp_a), len(kp_b), 1)
+        score = min(score, 1.0)
+
+        return {
+            "image_a": {
+                "width": im_a.shape[1],
+                "height": im_a.shape[0],
+                "keypoints": [{"x": round(kp.pt[0], 1), "y": round(kp.pt[1], 1)} for kp in kp_a[:200]],
+            },
+            "image_b": {
+                "width": im_b.shape[1],
+                "height": im_b.shape[0],
+                "keypoints": [{"x": round(kp.pt[0], 1), "y": round(kp.pt[1], 1)} for kp in kp_b[:200]],
+            },
+            "matches": [
+                {"a_idx": m.queryIdx, "b_idx": m.trainIdx, "distance": round(m.distance, 2)}
+                for m in good
+            ],
+            "score": round(score, 4),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Match computation failed: {e}")
+
+
 @app.get("/health")
 async def health_check():
     """健康检查"""

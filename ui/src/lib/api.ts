@@ -1,7 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { APIError } from "./errorHandler";
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 export type HashType =
   | "orb"
@@ -66,8 +66,12 @@ function toStaticUrl(filePath: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}/static/${sanitized}`;
 }
 
+function toThumbnailUrl(imageId: number, size = 400): string {
+  return `${API_BASE_URL.replace(/\/$/, "")}/thumbnail/${imageId}?size=${size}`;
+}
+
 function withPublicUrl(img: Image): Image {
-  return { ...img, public_url: toStaticUrl(img.file_path) };
+  return { ...img, public_url: toThumbnailUrl(img.id) };
 }
 
 function attachPublicUrlToAnalysis(result: AnalysisResult): AnalysisResult {
@@ -503,3 +507,47 @@ export const getPairwiseMatrix = async (
   }
   return response.json();
 };
+
+// Match Data (keypoints + matches as JSON for frontend rendering)
+export interface MatchKeypoint {
+  x: number;
+  y: number;
+}
+
+export interface MatchLine {
+  a_idx: number;
+  b_idx: number;
+  distance: number;
+}
+
+export interface MatchData {
+  image_a: { width: number; height: number; keypoints: MatchKeypoint[] };
+  image_b: { width: number; height: number; keypoints: MatchKeypoint[] };
+  matches: MatchLine[];
+  score: number;
+}
+
+export const getMatchData = async (
+  imageAId: number,
+  imageBId: number,
+  hashType: HashType = "sift"
+): Promise<MatchData> => {
+  const endpoint = `${API_BASE_URL}/match_data`;
+  const fd = new FormData();
+  fd.append("image_a_id", String(imageAId));
+  fd.append("image_b_id", String(imageBId));
+  fd.append("hash_type", hashType);
+  const response = await fetch(endpoint, { method: "POST", headers: await getAuthHeaders(), body: fd });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new APIError(
+      error.detail || "Match data request failed",
+      response.status,
+      endpoint,
+      error
+    );
+  }
+  return response.json();
+};
+
+export { toThumbnailUrl };
