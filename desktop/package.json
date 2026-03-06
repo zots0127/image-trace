@@ -1,8 +1,10 @@
 {
   "name": "image-trace-desktop",
   "productName": "Image Trace",
+  "description": "Cross-platform image comparison and deduplication tool",
+  "author": "zots0127",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
