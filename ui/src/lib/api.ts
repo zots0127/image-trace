@@ -555,11 +555,10 @@ export { toThumbnailUrl };
 
 // System Info
 export interface SystemInfo {
-  faiss_available: boolean;
-  faiss_type: "CPU" | "GPU" | null;
   engines: string[];
   algorithms: string[];
-  feature_types: string[];
+  matrix_engine: string;
+  description: string;
 }
 
 export const getSystemInfo = async (): Promise<SystemInfo> => {

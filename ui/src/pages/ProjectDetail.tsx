@@ -479,22 +479,17 @@ export default function ProjectDetail() {
                   <div className="flex flex-wrap items-center gap-2 mb-3">
                     {pairwiseData?.engine && (
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${pairwiseData.engine === 'matrix'
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                         }`}>
                         {pairwiseData.engine === 'matrix' ? '⚡' : '🔄'}
                         {pairwiseData.engine === 'matrix' ? 'Matrix Engine' : 'Legacy Engine'}
                       </span>
                     )}
-                    {systemInfo?.faiss_available && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                        🚀 FAISS {systemInfo.faiss_type}
-                      </span>
-                    )}
                     {featureStatus && (
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${featureStatus.all_ready
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-orange-500/15 text-orange-400 border border-orange-500/30'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-orange-500/15 text-orange-400 border border-orange-500/30'
                         }`}>
                         {featureStatus.all_ready ? '✅' : '⏳'}
                         {featureStatus.ready}/{featureStatus.total} Features Ready

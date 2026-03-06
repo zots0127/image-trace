@@ -293,16 +293,9 @@ def _generate_variant_paths(image_path: str) -> List[str]:
 
 
 # ============================================================================
-#  Matrix Comparison Engine — Batch NumPy + Optional FAISS
+#  Matrix Comparison Engine — Batch NumPy (BLAS-accelerated)
 # ============================================================================
 
-# Optional FAISS acceleration
-try:
-    import faiss
-    _HAS_FAISS = True
-except ImportError:
-    faiss = None
-    _HAS_FAISS = False
 
 
 def load_feature_vectors(
@@ -412,8 +405,7 @@ def compute_cosine_similarity_matrix(
     """
     Compute N×N cosine similarity using batch matrix multiplication (BLAS).
 
-    If FAISS is available, uses FAISS for even faster computation.
-    Non-rotation: single matrix @ matrix.T → sub-millisecond for 100 images.
+    Pure numpy mat @ mat.T — already sub-millisecond for 100 images.
     """
     n = len(image_ids)
     if n == 0:
@@ -436,15 +428,8 @@ def compute_cosine_similarity_matrix(
         norms = np.where(norms > 0, norms, 1.0)
         mat_normed = mat / norms
 
-        if _HAS_FAISS and not rotation_invariant and mat.shape[1] >= 4:
-            # FAISS inner product: fastest path
-            mat32 = mat_normed.astype(np.float32)
-            faiss.normalize_L2(mat32)
-            sim = mat32 @ mat32.T
-            sim = sim.astype(np.float64)
-        else:
-            # BLAS matrix multiply: still very fast
-            sim = mat_normed @ mat_normed.T
+        # BLAS-accelerated matrix multiply
+        sim = mat_normed @ mat_normed.T
 
         sim = np.clip(sim, 0.0, 1.0)
         np.maximum(best_sim, sim, out=best_sim)
