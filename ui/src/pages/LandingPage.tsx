@@ -1,20 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/contexts/AuthContext";
 import { ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 const LandingPage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { t } = useTranslation();
 
   const handleGetStarted = () => {
-    if (user) {
-      navigate("/dashboard");
-    } else {
-      navigate("/demo");
-    }
+    navigate("/dashboard");
   };
 
   return (
@@ -34,8 +28,8 @@ const LandingPage = () => {
           <p className="text-lg md:text-xl text-muted-foreground mb-10">
             {t("common.landingSub")}
           </p>
-          <Button 
-            size="lg" 
+          <Button
+            size="lg"
             onClick={handleGetStarted}
             className="h-12 px-8 text-base font-medium gap-2 group"
           >

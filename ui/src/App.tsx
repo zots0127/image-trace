@@ -4,8 +4,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { BackendGate } from "@/components/BackendGate";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import LandingPage from "./pages/LandingPage";
@@ -13,7 +11,6 @@ import Demo from "./pages/Demo";
 import Dashboard from "./pages/Dashboard";
 import ProjectDetail from "./pages/ProjectDetail";
 import DuplicateReport from "./pages/DuplicateReport";
-import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -23,56 +20,32 @@ const App = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <ErrorBoundary>
-            <BackendGate>
-              <HashRouter>
-                <Routes>
-                  {/* Public Routes */}
-                  <Route path="/landing" element={<LandingPage />} />
-                  <Route path="/demo" element={<Demo />} />
-                  <Route path="/auth" element={<Auth />} />
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <ErrorBoundary>
+          <BackendGate>
+            <HashRouter>
+              <Routes>
+                {/* Public Routes */}
+                <Route path="/landing" element={<LandingPage />} />
+                <Route path="/demo" element={<Demo />} />
 
-                  {/* Protected Routes */}
-                  <Route
-                    path="/dashboard"
-                    element={
-                      <ProtectedRoute>
-                        <Dashboard />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/project/:projectId"
-                    element={
-                      <ProtectedRoute>
-                        <ProjectDetail />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/report/:projectId"
-                    element={
-                      <ProtectedRoute>
-                        <DuplicateReport />
-                      </ProtectedRoute>
-                    }
-                  />
+                {/* App Routes (no auth needed — local desktop app) */}
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/project/:projectId" element={<ProjectDetail />} />
+                <Route path="/report/:projectId" element={<DuplicateReport />} />
 
-                  {/* Redirect root to dashboard */}
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                {/* Redirect root to dashboard */}
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-                  {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </HashRouter>
-            </BackendGate>
-          </ErrorBoundary>
-        </TooltipProvider>
-      </AuthProvider>
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </HashRouter>
+          </BackendGate>
+        </ErrorBoundary>
+      </TooltipProvider>
     </QueryClientProvider>
   );
 };

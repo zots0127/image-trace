@@ -2,17 +2,15 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { getProjects, deleteProject, type Project } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
-import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/CreateProjectDialog";
 import { ProjectCard } from "@/components/ProjectCard";
 import { SystemHealth } from "@/components/SystemHealth";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, FolderOpen, Copy, RefreshCw, LogOut } from "lucide-react";
+import { Loader2, FolderOpen, Copy, RefreshCw } from "lucide-react";
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -111,7 +109,7 @@ export default function Dashboard() {
             <div>
               <h1 className="text-3xl font-bold text-foreground">{t("common.appName")}</h1>
               <p className="text-muted-foreground mt-1">
-                {user?.email}
+                {t("common.landingSub")}
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -128,10 +126,7 @@ export default function Dashboard() {
               <div id="create-project-btn">
                 <CreateProjectDialog onProjectCreated={loadProjects} />
               </div>
-              <Button variant="outline" size="sm" onClick={signOut}>
-                <LogOut className="h-4 w-4 mr-2" />
-                {t("common.logout")}
-              </Button>
+
             </div>
           </div>
         </div>

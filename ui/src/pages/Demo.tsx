@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
+
 import { Navigation } from "@/components/Navigation";
-import { 
-  Upload, 
-  X, 
-  Loader2, 
+import {
+  Upload,
+  X,
+  Loader2,
   ArrowRight,
   Lock,
   Image as ImageIcon,
@@ -24,7 +24,7 @@ interface UploadedImage {
 
 const Demo = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+
   const { toast } = useToast();
   const { t } = useTranslation();
   const [images, setImages] = useState<UploadedImage[]>([]);
@@ -70,10 +70,10 @@ const Demo = () => {
     }
 
     setAnalyzing(true);
-    
+
     // Simulate analysis (in real app, this would call the backend)
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
+
     // Generate a random similarity score for demo
     const similarity = Math.random() * 0.4 + 0.3; // 30-70% similarity
     setResult({ similarity });
@@ -95,20 +95,20 @@ const Demo = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      
+
       <div className="container mx-auto px-4 py-12">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <div className="text-center mb-10">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-secondary/10 text-secondary text-sm font-medium mb-4">
               <Sparkles className="w-4 h-4" />
-                <span>{t("demo.badge")}</span>
+              <span>{t("demo.badge")}</span>
             </div>
             <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-                {t("demo.title")}
+              {t("demo.title")}
             </h1>
             <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-                {t("demo.subtitle")} {!user && t("demo.subtitleGuest")}
+              {t("demo.subtitle")}
             </p>
           </div>
 
@@ -117,9 +117,9 @@ const Demo = () => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Upload className="w-5 h-5" />
-                  {t("demo.uploadTitle")}
+                {t("demo.uploadTitle")}
               </CardTitle>
-                <CardDescription>{t("demo.uploadDesc")}</CardDescription>
+              <CardDescription>{t("demo.uploadDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
               {/* Image Previews */}
@@ -128,8 +128,8 @@ const Demo = () => {
                   {images.map((img, index) => (
                     <div key={index} className="relative group">
                       <div className="aspect-square rounded-lg overflow-hidden bg-muted border border-border">
-                        <img 
-                          src={img.preview} 
+                        <img
+                          src={img.preview}
                           alt={`Image ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
@@ -145,9 +145,9 @@ const Demo = () => {
                       </div>
                     </div>
                   ))}
-                  
+
                   {/* Add more */}
-                  <div 
+                  <div
                     {...getRootProps()}
                     className="aspect-square rounded-lg border-2 border-dashed border-border flex items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
                   >
@@ -164,11 +164,10 @@ const Demo = () => {
               {images.length === 0 && (
                 <div
                   {...getRootProps()}
-                  className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${
-                    isDragActive 
-                      ? "border-primary bg-primary/5" 
+                  className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${isDragActive
+                      ? "border-primary bg-primary/5"
                       : "border-border hover:border-primary/50 hover:bg-muted/50"
-                  }`}
+                    }`}
                 >
                   <input {...getInputProps()} />
                   <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -183,7 +182,7 @@ const Demo = () => {
 
               {/* Analyze Button */}
               {images.length >= 2 && (
-                <Button 
+                <Button
                   onClick={analyzeImages}
                   disabled={analyzing}
                   className="w-full mt-4"
@@ -227,36 +226,10 @@ const Demo = () => {
             </Card>
           )}
 
-          {/* Upgrade CTA */}
-          {!user && (
-            <Card className="bg-gradient-to-br from-primary/5 to-secondary/5 border-primary/20">
-              <CardContent className="p-8">
-                <div className="flex flex-col md:flex-row items-center gap-6">
-                  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <Lock className="w-8 h-8 text-primary" />
-                  </div>
-                  <div className="flex-1 text-center md:text-left">
-                    <h3 className="text-xl font-semibold text-foreground mb-2">
-                      {t("demo.upgradeTitle")}
-                    </h3>
-                    <p className="text-muted-foreground">
-                      {t("demo.upgradeDesc")}
-                    </p>
-                  </div>
-                  <Button 
-                    size="lg"
-                    onClick={() => navigate("/auth")}
-                  >
-                    {t("demo.upgradeCta")}
-                    <ArrowRight className="w-5 h-5 ml-2" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
-          {/* Already logged in */}
-          {user && result && (
+
+          {/* Go to Dashboard after results */}
+          {result && (
             <Card className="bg-gradient-to-br from-success/5 to-primary/5 border-success/20">
               <CardContent className="p-8">
                 <div className="flex flex-col md:flex-row items-center gap-6">
@@ -268,7 +241,7 @@ const Demo = () => {
                       {t("demo.loggedDesc")}
                     </p>
                   </div>
-                  <Button 
+                  <Button
                     size="lg"
                     onClick={() => navigate("/")}
                   >

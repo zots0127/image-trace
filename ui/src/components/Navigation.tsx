@@ -1,21 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, Image as ImageIcon, LogOut, LayoutDashboard } from "lucide-react";
+import { Menu, X, Image as ImageIcon, LayoutDashboard } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export function Navigation() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { t, i18n } = useTranslation();
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate("/dashboard");
-  };
 
   const isDashboard = location.pathname === "/dashboard" || location.pathname.startsWith("/project/");
 
@@ -29,7 +22,7 @@ export function Navigation() {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div 
+          <div
             className="flex items-center gap-2 cursor-pointer"
             onClick={() => navigate("/dashboard")}
           >
@@ -41,55 +34,32 @@ export function Navigation() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
-            <button 
+            <button
               onClick={() => navigate("/dashboard")}
-              className={`text-sm font-medium transition-colors hover:text-primary ${
-                isDashboard ? "text-primary" : "text-muted-foreground"
-              }`}
+              className={`text-sm font-medium transition-colors hover:text-primary ${isDashboard ? "text-primary" : "text-muted-foreground"
+                }`}
             >
               {t("common.dashboard")}
             </button>
-            <button 
+            <button
               onClick={() => navigate("/demo")}
-              className={`text-sm font-medium transition-colors hover:text-primary ${
-                location.pathname === "/demo" ? "text-primary" : "text-muted-foreground"
-              }`}
+              className={`text-sm font-medium transition-colors hover:text-primary ${location.pathname === "/demo" ? "text-primary" : "text-muted-foreground"
+                }`}
             >
               {t("common.demo")}
             </button>
           </div>
 
-          {/* Desktop Auth Buttons */}
+          {/* Desktop Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            {user ? (
-              <>
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => navigate("/dashboard")}
-                >
-                  <LayoutDashboard className="w-4 h-4 mr-2" />
-                  {t("common.dashboard")}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={handleSignOut}
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  {t("common.logout")}
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button 
-                  size="sm"
-                  onClick={() => navigate("/auth")}
-                >
-                  {t("common.signIn")} / {t("common.signUp")}
-                </Button>
-              </>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate("/dashboard")}
+            >
+              <LayoutDashboard className="w-4 h-4 mr-2" />
+              {t("common.dashboard")}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -100,7 +70,7 @@ export function Navigation() {
           </div>
 
           {/* Mobile Menu Button */}
-          <button 
+          <button
             className="md:hidden p-2"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           >
@@ -116,36 +86,19 @@ export function Navigation() {
         {mobileMenuOpen && (
           <div className="md:hidden py-4 border-t border-border">
             <div className="flex flex-col gap-2">
-              <button 
+              <button
                 onClick={() => { navigate("/demo"); setMobileMenuOpen(false); }}
                 className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
               >
                 {t("common.demo")}
               </button>
-              <button 
+              <button
                 onClick={() => { navigate("/dashboard"); setMobileMenuOpen(false); }}
                 className="px-4 py-2 text-left text-foreground hover:bg-muted rounded-md"
               >
                 {t("common.dashboard")}
               </button>
               <div className="border-t border-border my-2" />
-              {user ? (
-                <button 
-                  onClick={() => { handleSignOut(); setMobileMenuOpen(false); }}
-                  className="px-4 py-2 text-left text-destructive hover:bg-muted rounded-md"
-                >
-                  {t("common.logout")}
-                </button>
-              ) : (
-                <>
-                  <Button 
-                    className="mx-4"
-                    onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
-                  >
-                    {t("common.signIn")} / {t("common.signUp")}
-                  </Button>
-                </>
-              )}
               <Button
                 variant="ghost"
                 size="sm"

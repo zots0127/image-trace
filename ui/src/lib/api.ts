@@ -1,4 +1,3 @@
-import { supabase } from "@/integrations/supabase/client";
 import { APIError } from "./errorHandler";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -24,15 +23,7 @@ function getJsonHeaders(): HeadersInit {
 }
 
 async function getAuthHeaders(): Promise<HeadersInit> {
-  try {
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (token) {
-      return { Authorization: `Bearer ${token}` };
-    }
-  } catch {
-    // 离线模式或未配置 Supabase：忽略
-  }
+  // Local desktop app — no cloud auth needed
   return {};
 }
 
