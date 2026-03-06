@@ -648,3 +648,118 @@ def calculate_hybrid_similarity(
     if total_weight == 0:
         return 0.0
     return total_score / total_weight
+
+
+# ============================================================================
+#  旋转/翻转不变性增强
+# ============================================================================
+
+# 8 种方向变体: 4 旋转 × (原图 + 水平翻转)
+_ORIENTATIONS = [
+    None,                                    # 原图
+    PILImage.Transpose.ROTATE_90,            # 旋转 90°
+    PILImage.Transpose.ROTATE_180,           # 旋转 180°
+    PILImage.Transpose.ROTATE_270,           # 旋转 270°
+    PILImage.Transpose.FLIP_LEFT_RIGHT,      # 水平翻转
+    (PILImage.Transpose.FLIP_LEFT_RIGHT, PILImage.Transpose.ROTATE_90),   # 翻转 + 90°
+    (PILImage.Transpose.FLIP_LEFT_RIGHT, PILImage.Transpose.ROTATE_180),  # 翻转 + 180°
+    (PILImage.Transpose.FLIP_LEFT_RIGHT, PILImage.Transpose.ROTATE_270),  # 翻转 + 270°
+]
+
+import tempfile as _tempfile
+
+
+def _generate_orientation_variants(image_path: str) -> List[str]:
+    """
+    生成图像的 8 种方向变体（4 旋转 × 2 翻转态）。
+    返回 [原图路径, 变体1路径, ..., 变体7路径]。
+    调用方负责清理临时文件。
+    """
+    paths = [image_path]  # 第一个始终是原图
+    img = PILImage.open(image_path)
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+
+    for orient in _ORIENTATIONS[1:]:  # 跳过 None（原图）
+        variant = img.copy()
+        if isinstance(orient, tuple):
+            for op in orient:
+                variant = variant.transpose(op)
+        else:
+            variant = variant.transpose(orient)
+
+        fd, tmp_path = _tempfile.mkstemp(suffix='.png')
+        os.close(fd)
+        variant.save(tmp_path)
+        paths.append(tmp_path)
+
+    img.close()
+    return paths
+
+
+def compare_with_orientations(
+    path_a: str,
+    path_b: str,
+    scorer,
+    features_a: Optional[Dict[str, Any]] = None,
+    features_b_list: Optional[List[Dict[str, Any]]] = None,
+) -> float:
+    """
+    对 image_b 的 8 种方向变体逐一与 image_a 比较，返回最高分。
+
+    Args:
+        path_a: 基准图像路径
+        path_b: 待比较图像路径
+        scorer: 评分函数 scorer(path_a, path_b_variant, feat_a?, feat_b?) -> float
+        features_a: 基准图特征（hash 类算法需要）
+        features_b_list: 各变体预算特征（hash 类算法需要，长度=8）
+
+    Returns:
+        所有方向变体中的最高相似度 (0-1)
+    """
+    variants = _generate_orientation_variants(path_b)
+    best_score = 0.0
+
+    try:
+        for i, variant_path in enumerate(variants):
+            try:
+                if features_a is not None and features_b_list is not None:
+                    score = scorer(path_a, variant_path, features_a, features_b_list[i])
+                else:
+                    score = scorer(path_a, variant_path)
+                best_score = max(best_score, score)
+                # 如果已达到 0.95+，提前退出（完美匹配不需要继续）
+                if best_score >= 0.95:
+                    break
+            except Exception:
+                continue
+    finally:
+        # 清理临时文件（跳过第一个，那是原图）
+        for p in variants[1:]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+    return best_score
+
+
+def compute_features_for_variants(image_path: str) -> List[Dict[str, Any]]:
+    """
+    计算一张图片 8 种方向变体的哈希特征。
+    用于 hash 类算法的方向不变比对。
+    """
+    variants = _generate_orientation_variants(image_path)
+    features_list = []
+
+    try:
+        for v_path in variants:
+            features_list.append(compute_image_features(v_path))
+    finally:
+        for p in variants[1:]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+    return features_list

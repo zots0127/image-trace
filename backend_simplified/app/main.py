@@ -336,6 +336,7 @@ async def compare_project_images(
     project_id: int,
     threshold: float = Form(default=0.85),
     hash_type: str = Form(default="phash"),
+    rotation_invariant: bool = Form(default=False),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     session: Session = Depends(get_db)
 ):
@@ -345,7 +346,8 @@ async def compare_project_images(
     Args:
         project_id: 项目ID
         threshold: 相似度阈值 (0-1)
-        hash_type: 哈希类型 (phash/dhash/ahash/whash)
+        hash_type: 比对算法
+        rotation_invariant: 是否启用旋转/翻转不变性（测试8种方向取最高分）
 
     Returns:
         比对结果
@@ -364,7 +366,10 @@ async def compare_project_images(
 
     try:
         # 执行比对
-        result = compare_images_in_project(session, project_id, threshold, hash_type)
+        result = compare_images_in_project(
+            session, project_id, threshold, hash_type,
+            rotation_invariant=rotation_invariant
+        )
         return result
 
     except Exception as e:

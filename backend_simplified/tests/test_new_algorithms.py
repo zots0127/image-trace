@@ -208,3 +208,72 @@ class TestHybridFusion:
         fb = compute_image_features(b)
         score = calculate_hybrid_similarity(a, b, fa, fb)
         assert 0.0 <= score <= 1.0
+
+
+# ---------- Rotation / Flip Invariance ------------------------------------
+
+class TestRotationInvariance:
+    """验证 compare_with_orientations 增强后旋转/翻转鲁棒性。"""
+
+    @pytest.fixture
+    def rotated_pair(self, tmp_path):
+        """原图 + 旋转90° 版本。"""
+        from app.image_processor import compare_with_orientations
+        np.random.seed(42)
+        arr = np.random.randint(30, 225, (200, 200, 3), dtype=np.uint8)
+        arr[:40, :40] = [220, 30, 30]
+        pa = tmp_path / "rot_orig.png"
+        PILImage.fromarray(arr).save(str(pa))
+
+        rotated = PILImage.fromarray(arr).rotate(90, expand=True)
+        pb = tmp_path / "rot_90.png"
+        rotated.save(str(pb))
+        return str(pa), str(pb)
+
+    @pytest.fixture
+    def flipped_pair(self, tmp_path):
+        """原图 + 水平翻转 版本。"""
+        np.random.seed(42)
+        arr = np.random.randint(30, 225, (200, 200, 3), dtype=np.uint8)
+        arr[:40, :40] = [220, 30, 30]
+        pa = tmp_path / "flip_orig.png"
+        PILImage.fromarray(arr).save(str(pa))
+
+        flipped = PILImage.fromarray(arr).transpose(PILImage.FLIP_LEFT_RIGHT)
+        pb = tmp_path / "flip_h.png"
+        flipped.save(str(pb))
+        return str(pa), str(pb)
+
+    def test_ssim_rotation_enhanced(self, rotated_pair):
+        from app.image_processor import compare_with_orientations
+        a, b = rotated_pair
+        # 原始 SSIM 对旋转失效
+        raw = calculate_ssim_similarity(a, b)
+        assert raw < 0.5
+        # 增强后应接近 1.0
+        enhanced = compare_with_orientations(a, b, calculate_ssim_similarity)
+        assert enhanced >= 0.90
+
+    def test_ssim_flip_enhanced(self, flipped_pair):
+        from app.image_processor import compare_with_orientations
+        a, b = flipped_pair
+        enhanced = compare_with_orientations(a, b, calculate_ssim_similarity)
+        assert enhanced >= 0.90
+
+    def test_orb_flip_enhanced(self, flipped_pair):
+        from app.image_processor import compare_with_orientations, compute_descriptor
+        a, b = flipped_pair
+        def orb_scorer(pa, pb):
+            da, na = compute_descriptor(pa, 'orb')
+            db, _ = compute_descriptor(pb, 'orb')
+            return calculate_descriptor_similarity(da, db, na)
+        enhanced = compare_with_orientations(a, b, orb_scorer)
+        assert enhanced >= 0.90
+
+    def test_histogram_rotation_invariant(self, rotated_pair):
+        """直方图本身对旋转不敏感，增强后保持高分。"""
+        from app.image_processor import compare_with_orientations
+        a, b = rotated_pair
+        enhanced = compare_with_orientations(a, b, calculate_histogram_similarity)
+        assert enhanced >= 0.90
+

@@ -10,16 +10,13 @@ from sqlmodel.pool import StaticPool
 from .models import Project, Image, ImageRead, ComparisonResult, SimilarGroup, ProjectRead, AnalysisRun
 import json
 from .image_processor import (
-    group_similar_images,
-    calculate_similarity,
-    calculate_descriptor_similarity,
-    get_cached_descriptor,
-    calculate_ssim_similarity,
-    calculate_histogram_similarity,
-    calculate_template_similarity,
-    calculate_hybrid_similarity,
-    compute_image_features,
+    compute_image_features, calculate_similarity,
+    find_similar_images, group_similar_images,
     HASH_ALGOS, PIXEL_ALGOS, DESCRIPTOR_ALGOS, FUSION_ALGOS, ALL_ALGOS,
+    get_cached_descriptor, calculate_descriptor_similarity,
+    calculate_ssim_similarity, calculate_histogram_similarity,
+    calculate_template_similarity, calculate_hybrid_similarity,
+    compare_with_orientations,
 )
 
 # 静态文件根目录（存储 uploads/extracted），默认 data
@@ -216,7 +213,8 @@ def compare_images_in_project(
     session: Session,
     project_id: int,
     threshold: float = 0.85,
-    hash_type: str = 'orb'
+    hash_type: str = 'orb',
+    rotation_invariant: bool = False,
 ) -> ComparisonResult:
     """
     比对项目中的所有图像
@@ -283,6 +281,15 @@ def compare_images_in_project(
     # 执行相似度分组
     if hash_type in DESCRIPTOR_ALGOS:
         def scorer(a: dict, b: dict) -> float:
+            if rotation_invariant:
+                pa = str(STATIC_DIR / a['file_path'])
+                pb = str(STATIC_DIR / b['file_path'])
+                def _desc_scorer(p_a, p_b):
+                    from .image_processor import compute_descriptor
+                    da, na = compute_descriptor(p_a, hash_type)
+                    db, _ = compute_descriptor(p_b, hash_type)
+                    return calculate_descriptor_similarity(da, db, na)
+                return compare_with_orientations(pa, pb, _desc_scorer)
             return calculate_descriptor_similarity(
                 a.get('descriptor'),
                 b.get('descriptor'),
@@ -303,6 +310,8 @@ def compare_images_in_project(
             try:
                 pa = str(STATIC_DIR / a['file_path'])
                 pb = str(STATIC_DIR / b['file_path'])
+                if rotation_invariant:
+                    return compare_with_orientations(pa, pb, pixel_fn)
                 return pixel_fn(pa, pb)
             except Exception:
                 return 0.0
@@ -314,6 +323,13 @@ def compare_images_in_project(
             try:
                 pa = str(STATIC_DIR / a['file_path'])
                 pb = str(STATIC_DIR / b['file_path'])
+                if rotation_invariant:
+                    def _fusion_scorer(p_a, p_b):
+                        from .image_processor import compute_image_features as _cif
+                        fa = _cif(p_a)
+                        fb = _cif(p_b)
+                        return calculate_hybrid_similarity(p_a, p_b, fa, fb)
+                    return compare_with_orientations(pa, pb, _fusion_scorer)
                 return calculate_hybrid_similarity(pa, pb, a, b)
             except Exception:
                 return 0.0
@@ -321,7 +337,28 @@ def compare_images_in_project(
 
     else:
         # Tier 1: 哈希类算法
-        groups, ungrouped = group_similar_images(image_dicts, threshold, hash_type)
+        if rotation_invariant:
+            # 对每张图的 8 种变体计算哈希，比对时取最高分
+            from .image_processor import compute_features_for_variants
+            variant_cache = {}  # file_hash -> [features_list]
+            def scorer(a: dict, b: dict) -> float:
+                fh_b = b['file_hash']
+                if fh_b not in variant_cache:
+                    pb = str(STATIC_DIR / b['file_path'])
+                    variant_cache[fh_b] = compute_features_for_variants(pb)
+                best = 0.0
+                for vf in variant_cache[fh_b]:
+                    s = calculate_similarity(
+                        a.get(hash_type, ''),
+                        vf.get(hash_type, '')
+                    )
+                    best = max(best, s)
+                    if best >= 0.95:
+                        break
+                return best
+            groups, ungrouped = group_similar_by_metric(image_dicts, threshold, scorer)
+        else:
+            groups, ungrouped = group_similar_images(image_dicts, threshold, hash_type)
 
     # 转换为响应格式
     similar_groups = []
