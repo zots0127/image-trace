@@ -482,10 +482,10 @@ async def visualize_match(
     """
     生成两张图片的特征点匹配可视化，返回可下载路径
     """
-    descriptor_algos = ['orb', 'brisk', 'sift']
+    descriptor_algos = ['orb', 'brisk', 'sift', 'akaze', 'kaze']
     algo = hash_type
     if algo not in descriptor_algos:
-        raise HTTPException(status_code=400, detail="该算法不支持特征点可视化")
+        raise HTTPException(status_code=400, detail=f"该算法不支持特征点可视化，支持: {', '.join(descriptor_algos)}")
 
     img_a = session.get(Image, image_a_id)
     img_b = session.get(Image, image_b_id)
@@ -511,6 +511,86 @@ async def visualize_match(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"生成可视化失败: {str(e)}")
+
+
+
+@app.get("/pairwise_matrix/{project_id}")
+async def pairwise_matrix(
+    project_id: int,
+    hash_type: str = "sift",
+    rotation_invariant: bool = False,
+    session: Session = Depends(get_db)
+):
+    """
+    Compute N×N pairwise similarity matrix for all images in a project.
+    Returns: { names: [...], matrix: [[...]], algorithm: str }
+    """
+    if hash_type not in ALL_ALGOS:
+        raise HTTPException(status_code=400, detail=f"Unsupported algorithm: {hash_type}")
+
+    statement = select(Image).where(Image.project_id == project_id)
+    images = session.exec(statement).all()
+    if not images:
+        return {"names": [], "matrix": [], "algorithm": hash_type}
+
+    n = len(images)
+    names = [img.filename for img in images]
+    ids = [img.id for img in images]
+
+    def resolve(fp):
+        if fp and fp.startswith("data/"):
+            fp = fp[len("data/"):]
+        return str(STATIC_DIR / (fp or ""))
+
+    paths = [resolve(img.file_path) for img in images]
+
+    # Precompute features
+    features = []
+    for p in paths:
+        try:
+            features.append(compute_image_features(p))
+        except Exception:
+            features.append({})
+
+    # Compute pairwise scores
+    matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        matrix[i][i] = 1.0
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            try:
+                if hash_type in HASH_ALGOS:
+                    score = calculate_similarity(
+                        features[i].get(hash_type, ''),
+                        features[j].get(hash_type, '')
+                    )
+                elif hash_type in DESCRIPTOR_ALGOS:
+                    desc_a, norm_a = get_cached_descriptor(paths[i], images[i].file_hash, hash_type)
+                    desc_b, _ = get_cached_descriptor(paths[j], images[j].file_hash, hash_type)
+                    score = calculate_descriptor_similarity(desc_a, desc_b, norm_a)
+                elif hash_type == 'ssim':
+                    score = calculate_ssim_similarity(paths[i], paths[j])
+                elif hash_type == 'histogram':
+                    score = calculate_histogram_similarity(paths[i], paths[j])
+                elif hash_type == 'template':
+                    score = calculate_template_similarity(paths[i], paths[j])
+                elif hash_type == 'auto':
+                    score = calculate_hybrid_similarity(paths[i], paths[j], features[i], features[j])
+                else:
+                    score = 0.0
+            except Exception:
+                score = 0.0
+
+            matrix[i][j] = round(score, 4)
+            matrix[j][i] = round(score, 4)
+
+    return {
+        "names": names,
+        "image_ids": ids,
+        "matrix": matrix,
+        "algorithm": hash_type,
+    }
 
 
 @app.get("/images/{project_id}")

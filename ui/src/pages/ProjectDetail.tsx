@@ -7,6 +7,7 @@ import {
   analyzeImages,
   getComparisonResults,
   visualizeMatch,
+  getPairwiseMatrix,
   getAnalysisRuns,
   getAnalysisRunDetail,
   type Project,
@@ -14,6 +15,7 @@ import {
   type AnalysisResult,
   type HashType,
   type AnalysisRun,
+  type PairwiseMatrixResult,
 } from "@/lib/api";
 import { copyErrorToClipboard, APIError } from "@/lib/errorHandler";
 import { ImageUploadZone } from "@/components/ImageUploadZone";
@@ -48,6 +50,8 @@ export default function ProjectDetail() {
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [pairwiseData, setPairwiseData] = useState<PairwiseMatrixResult | null>(null);
+  const [loadingPairwise, setLoadingPairwise] = useState(false);
   const locale = i18n.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 
   const loadProject = useCallback(async () => {
@@ -132,28 +136,40 @@ export default function ProjectDetail() {
   };
 
   const getAlgorithmLabel = (algo: HashType) => {
-    const labels: Record<HashType, string> = {
-      phash: "感知哈希",
-      dhash: "差值哈希",
-      ahash: "平均哈希",
-      whash: "小波哈希",
-      orb: "ORB 局部特征",
-      brisk: "BRISK 特征",
-      sift: "SIFT 关键点",
-      surf: "SURF 关键点",
-      hybrid: "Hybrid (哈希+ORB)",
+    const labels: Record<string, string> = {
+      phash: "pHash",
+      dhash: "dHash",
+      ahash: "aHash",
+      whash: "wHash",
+      colorhash: "ColorHash",
+      orb: "ORB",
+      brisk: "BRISK",
+      sift: "SIFT",
+      akaze: "AKAZE",
+      kaze: "KAZE",
+      ssim: "SSIM",
+      histogram: "Histogram",
+      template: "Template",
+      auto: "Auto (Hybrid)",
     };
     return labels[algo] || algo;
   };
 
-  const handleAnalyze = async (algo: HashType) => {
+  const handleAnalyze = async (algo: HashType, rotationInvariant: boolean = false) => {
     if (!projectId) return;
     setAnalyzing(true);
     try {
       setLastAlgo(algo);
-      const res = await analyzeImages(projectId, algo);
+      const res = await analyzeImages(projectId, algo, 0.85, rotationInvariant);
       setCompareResult(res);
+      // Also fetch pairwise matrix
+      setLoadingPairwise(true);
+      getPairwiseMatrix(projectId, algo)
+        .then(setPairwiseData)
+        .catch(() => { })
+        .finally(() => setLoadingPairwise(false));
       toast({ title: t("project.analyzeSuccess"), description: t("project.analyzeSuccessDesc", { total: res.total_images, groups: res.groups.length }) });
+      loadRuns();
     } catch (error) {
       const err = error as APIError;
       toast({
@@ -425,6 +441,8 @@ export default function ProjectDetail() {
                     <option value="orb">ORB</option>
                     <option value="brisk">BRISK</option>
                     <option value="sift">SIFT</option>
+                    <option value="akaze">AKAZE</option>
+                    <option value="kaze">KAZE</option>
                   </select>
                 </span>
               </div>
@@ -435,8 +453,29 @@ export default function ProjectDetail() {
               </div>
               {showAdvanced && (
                 <>
-                  <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
-                  <SimilarityGraph groups={compareResult.groups} />
+                  {pairwiseData && pairwiseData.matrix.length > 0 ? (
+                    <SimilarityMatrix matrix={pairwiseData.matrix} imageNames={pairwiseData.names} />
+                  ) : similarityMatrix ? (
+                    <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
+                  ) : null}
+                  <SimilarityGraph
+                    groups={compareResult.groups}
+                    imageIds={pairwiseData?.image_ids}
+                    matchAlgo={matchAlgo}
+                    onEdgeClick={async (imgAId: number, imgBId: number) => {
+                      try {
+                        const { url } = await visualizeMatch(imgAId, imgBId, matchAlgo);
+                        setMatchImage(url);
+                      } catch (error) {
+                        const err = error as APIError;
+                        toast({
+                          title: t("project.generateMatchFailed"),
+                          description: err.message,
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                  />
                 </>
               )}
               <div className="space-y-3">

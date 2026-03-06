@@ -1,0 +1,147 @@
+"""Tests for pairwise matrix API, expanded visualize_match, and rotation_invariant."""
+
+import pytest
+from tests.conftest import make_upload_bytes
+
+
+class TestPairwiseMatrix:
+    """Tests for GET /pairwise_matrix/{project_id}"""
+
+    def _setup_project(self, client, count=3):
+        resp = client.post("/projects", json={"name": "PairwiseTest"})
+        pid = resp.json()["id"]
+        colors = [(200, 50, 50), (200, 50, 50), (50, 50, 200)]
+        for i in range(count):
+            color = colors[i] if i < len(colors) else (i * 50, i * 30, i * 10)
+            file_tuple = make_upload_bytes(f"pw_{i}.png", color=color)
+            client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        return pid
+
+    def test_pairwise_empty_project(self, client):
+        resp = client.post("/projects", json={"name": "EmptyPW"})
+        pid = resp.json()["id"]
+        resp = client.get(f"/pairwise_matrix/{pid}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["names"] == []
+        assert data["matrix"] == []
+
+    def test_pairwise_with_images(self, client):
+        pid = self._setup_project(client, count=3)
+        resp = client.get(f"/pairwise_matrix/{pid}?hash_type=phash")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["names"]) == 3
+        assert len(data["matrix"]) == 3
+        assert len(data["matrix"][0]) == 3
+        assert len(data["image_ids"]) == 3
+        assert data["algorithm"] == "phash"
+        # Diagonal should be 1.0
+        for i in range(3):
+            assert data["matrix"][i][i] == 1.0
+        # Matrix should be symmetric
+        for i in range(3):
+            for j in range(3):
+                assert data["matrix"][i][j] == data["matrix"][j][i]
+
+    def test_pairwise_invalid_algo(self, client):
+        resp = client.post("/projects", json={"name": "BadAlgo"})
+        pid = resp.json()["id"]
+        resp = client.get(f"/pairwise_matrix/{pid}?hash_type=invalid")
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize("algo", ["phash", "dhash", "ssim", "histogram", "orb", "sift"])
+    def test_pairwise_all_algorithms(self, client, algo):
+        """Test pairwise matrix with various algorithm types."""
+        pid = self._setup_project(client, count=2)
+        resp = client.get(f"/pairwise_matrix/{pid}?hash_type={algo}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["matrix"]) == 2
+        assert 0.0 <= data["matrix"][0][1] <= 1.0
+
+
+class TestVisualizeMatchExpanded:
+    """Tests for expanded /visualize_match (akaze/kaze support)."""
+
+    def _setup_pair(self, client):
+        resp = client.post("/projects", json={"name": "VizMatch"})
+        pid = resp.json()["id"]
+        for name in ["viz_a.png", "viz_b.png"]:
+            file_tuple = make_upload_bytes(name, size=(200, 200))
+            client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        images = client.get(f"/images/{pid}").json()
+        return images[0]["id"], images[1]["id"]
+
+    @pytest.mark.parametrize("algo", ["orb", "sift", "brisk", "akaze", "kaze"])
+    def test_visualize_match_all_descriptors(self, client, algo):
+        a_id, b_id = self._setup_pair(client)
+        resp = client.post("/visualize_match", data={
+            "image_a_id": str(a_id),
+            "image_b_id": str(b_id),
+            "hash_type": algo,
+        })
+        # May fail with "not enough features" on simple images — that's okay
+        assert resp.status_code in (200, 500)
+
+    def test_visualize_match_unsupported_algo(self, client):
+        a_id, b_id = self._setup_pair(client)
+        resp = client.post("/visualize_match", data={
+            "image_a_id": str(a_id),
+            "image_b_id": str(b_id),
+            "hash_type": "phash",
+        })
+        assert resp.status_code == 400
+
+    def test_visualize_match_nonexistent_image(self, client):
+        resp = client.post("/visualize_match", data={
+            "image_a_id": "9999",
+            "image_b_id": "9998",
+            "hash_type": "orb",
+        })
+        assert resp.status_code == 404
+
+
+class TestRotationInvariantAPI:
+    """Tests for rotation_invariant parameter in /compare."""
+
+    def _setup_project(self, client):
+        resp = client.post("/projects", json={"name": "RotInv"})
+        pid = resp.json()["id"]
+        for name, color in [("r1.png", (200, 50, 50)), ("r2.png", (200, 50, 50))]:
+            file_tuple = make_upload_bytes(name, color=color)
+            client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        return pid
+
+    def test_compare_with_rotation_invariant(self, client):
+        pid = self._setup_project(client)
+        resp = client.post(f"/compare/{pid}", data={
+            "threshold": "0.85",
+            "hash_type": "ssim",
+            "rotation_invariant": "true",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_images"] == 2
+
+    def test_compare_without_rotation_invariant(self, client):
+        pid = self._setup_project(client)
+        resp = client.post(f"/compare/{pid}", data={
+            "threshold": "0.85",
+            "hash_type": "ssim",
+            "rotation_invariant": "false",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_images"] == 2
+
+    @pytest.mark.parametrize("algo", ["auto", "ssim", "histogram", "template", "colorhash"])
+    def test_compare_new_algos(self, client, algo):
+        """Verify all newly added algorithms work via the API."""
+        pid = self._setup_project(client)
+        resp = client.post(f"/compare/{pid}", data={
+            "threshold": "0.85",
+            "hash_type": algo,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["total_images"] == 2

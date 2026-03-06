@@ -28,13 +28,14 @@ python -m pytest tests/ -v --cov=app --cov-report=term-missing
 
 | 测试文件 | 覆盖模块 | 测试数 |
 |:---|:---|---:|
-| `tests/test_image_processor.py` | `image_processor.py` — 哈希/分组/resize/缓存/可视化/错误分支/格式 | 47 |
-| `tests/test_new_algorithms.py` | `image_processor.py` — SSIM/直方图/模板/AKAZE/KAZE/colorhash/fusion | 20 |
-| `tests/test_utils.py` | `utils.py` — 格式/目录/DB/分组/文件删除/清理 | 38 |
+| `tests/test_image_processor.py` | `image_processor.py` — hash/grouping/resize/cache/viz/error/format | 47 |
+| `tests/test_new_algorithms.py` | `image_processor.py` — SSIM/histogram/template/AKAZE/KAZE/colorhash/fusion/rotation | 24 |
+| `tests/test_pairwise_and_viz.py` | `main.py` — pairwise matrix API, expanded visualize_match, rotation_invariant, new algos | 23 |
+| `tests/test_utils.py` | `utils.py` — format/dir/DB/grouping/file-delete/cleanup | 38 |
 | `tests/test_document_parser.py` | `document_parser.py` | 13 |
-| `tests/test_api.py` | `main.py` (API 集成) | 19 |
-| `tests/conftest.py` | 共享 fixtures | — |
-| **合计** | | **159** |
+| `tests/test_api.py` | `main.py` (API integration) | 19 |
+| `tests/conftest.py` | Shared fixtures | — |
+| **Total** | | **186** |
 
 ## 支持的图像格式（55 种扩展名）
 
@@ -57,7 +58,17 @@ python -m pytest tests/ -v --cov=app --cov-report=term-missing
 
 | 层级 | 算法 | 说明 |
 |:---|:---|:---|
-| **Tier 1** 哈希 | phash, dhash, ahash, whash, colorhash | 毫秒级，大规模初筛 |
-| **Tier 2** 像素 | ssim, histogram, template | 百毫秒级，精细场景 |
-| **Tier 3** 特征 | orb, sift, brisk, akaze, kaze | 秒级，几何变换场景 |
-| **融合** | auto | pHash(0.3) + SSIM(0.3) + ORB(0.4) 加权 |
+| **Tier 1** Hash | phash, dhash, ahash, whash, colorhash | Millisecond-level, large-scale screening |
+| **Tier 2** Pixel | ssim, histogram, template | 100ms-level, structural comparison |
+| **Tier 3** Feature | orb, sift, brisk, akaze, kaze | Second-level, geometric transform robust |
+| **Fusion** | auto | pHash(0.3) + SSIM(0.3) + ORB(0.4) weighted |
+
+## Rotation / Flip Invariance
+
+| Feature | Description |
+|:---|:---|
+| `rotation_invariant` param | Tests 8 orientations (4 rotations × 2 flips), returns max score |
+| Enhancement | SSIM: 0.02→1.00, ORB flip: 0.70→1.00 |
+| API | `POST /compare/{id}` with `rotation_invariant=true` |
+| Pairwise Matrix | `GET /pairwise_matrix/{id}` — N×N similarity for all images |
+| Match Visualization | `POST /visualize_match` — supports orb/brisk/sift/akaze/kaze |

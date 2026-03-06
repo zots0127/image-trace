@@ -3,9 +3,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 interface SimilarityMatrixProps {
   matrix: number[][];
   imageNames?: string[];
+  images?: Array<{ filename?: string; id?: number }>;
 }
 
-export function SimilarityMatrix({ matrix, imageNames = [] }: SimilarityMatrixProps) {
+export function SimilarityMatrix({ matrix, imageNames = [], images }: SimilarityMatrixProps) {
+  // Support both imageNames and images props
+  const names = imageNames.length > 0
+    ? imageNames
+    : (images || []).map((img) => img.filename || `#${img.id}`);
   if (!matrix || matrix.length === 0) {
     return null;
   }
@@ -40,7 +45,7 @@ export function SimilarityMatrix({ matrix, imageNames = [] }: SimilarityMatrixPr
                       className="border border-border p-2 bg-muted text-xs font-medium"
                       style={{ minWidth: cellSize }}
                     >
-                      {imageNames[i] || `图片 ${i + 1}`}
+                      {names[i] || `Image ${i + 1}`}
                     </th>
                   ))}
                 </tr>
@@ -49,7 +54,7 @@ export function SimilarityMatrix({ matrix, imageNames = [] }: SimilarityMatrixPr
                 {matrix.map((row, i) => (
                   <tr key={i}>
                     <td className="border border-border p-2 bg-muted text-xs font-medium">
-                      {imageNames[i] || `图片 ${i + 1}`}
+                      {names[i] || `Image ${i + 1}`}
                     </td>
                     {row.map((value, j) => (
                       <td

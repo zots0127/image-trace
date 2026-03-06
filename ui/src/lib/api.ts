@@ -7,12 +7,17 @@ export type HashType =
   | "orb"
   | "brisk"
   | "sift"
+  | "akaze"
+  | "kaze"
   | "phash"
   | "dhash"
   | "ahash"
   | "whash"
-  | "surf"
-  | "hybrid";
+  | "colorhash"
+  | "ssim"
+  | "histogram"
+  | "template"
+  | "auto";
 
 function getJsonHeaders(): HeadersInit {
   return { "Content-Type": "application/json" };
@@ -135,7 +140,7 @@ export const getProjects = async (): Promise<Project[]> => {
   const endpoint = `${API_BASE_URL}/projects`;
   try {
     const response = await fetch(endpoint, { headers: await getAuthHeaders() });
-    
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: response.statusText }));
       throw new APIError(
@@ -289,9 +294,9 @@ export const extractDocument = async (projectId: string, filePath: string): Prom
     extracted_images_count: Array.isArray(data.images) ? data.images.length : 0,
     images: Array.isArray(data.images)
       ? (data.images as ProcessedImage[]).map((img) => ({
-          ...img,
-          public_url: toStaticUrl(img.file_path || ""),
-        }))
+        ...img,
+        public_url: toStaticUrl(img.file_path || ""),
+      }))
       : [],
     error: data.error,
   };
@@ -348,12 +353,14 @@ export const deleteImage = async (projectId: string, imageId: string): Promise<v
 export const analyzeImages = async (
   projectId: string,
   hashType: HashType = "orb",
-  threshold = 0.85
+  threshold = 0.85,
+  rotationInvariant = false
 ): Promise<AnalysisResult> => {
   const endpoint = `${API_BASE_URL}/compare/${projectId}`;
   const fd = new FormData();
   fd.append("threshold", String(threshold));
   fd.append("hash_type", hashType);
+  fd.append("rotation_invariant", String(rotationInvariant));
   const headers = await getAuthHeaders();
   const response = await fetch(endpoint, {
     method: "POST",
@@ -469,4 +476,30 @@ export const visualizeMatch = async (
   }
   const data = await response.json();
   return { url: toStaticUrl(data.file_path) };
+};
+
+// Pairwise Matrix
+export interface PairwiseMatrixResult {
+  names: string[];
+  image_ids: number[];
+  matrix: number[][];
+  algorithm: string;
+}
+
+export const getPairwiseMatrix = async (
+  projectId: string,
+  hashType: HashType = "sift"
+): Promise<PairwiseMatrixResult> => {
+  const endpoint = `${API_BASE_URL}/pairwise_matrix/${projectId}?hash_type=${encodeURIComponent(hashType)}`;
+  const response = await fetch(endpoint, { headers: await getAuthHeaders() });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new APIError(
+      error.detail || "获取相似度矩阵失败",
+      response.status,
+      endpoint,
+      error
+    );
+  }
+  return response.json();
 };
