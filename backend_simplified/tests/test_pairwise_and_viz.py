@@ -145,3 +145,73 @@ class TestRotationInvariantAPI:
         })
         assert resp.status_code == 200
         assert resp.json()["total_images"] == 2
+
+
+class TestDbSchemaMigration:
+    """Tests for automatic DB schema migration on startup."""
+
+    def test_migrate_adds_missing_column(self, tmp_path):
+        """Verify _migrate_db_schema adds a missing colorhash column."""
+        import sqlite3
+        db_path = tmp_path / "test_migrate.db"
+        conn = sqlite3.connect(str(db_path))
+        # Create images table WITHOUT colorhash
+        conn.execute("""
+            CREATE TABLE images (
+                id INTEGER PRIMARY KEY,
+                filename VARCHAR NOT NULL,
+                project_id INTEGER NOT NULL,
+                file_path VARCHAR NOT NULL,
+                file_hash VARCHAR NOT NULL,
+                phash VARCHAR NOT NULL,
+                created_at DATETIME
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # Run migration
+        import importlib
+        import app.main as main_mod
+        importlib.reload(main_mod)
+        main_mod._migrate_db_schema(f"sqlite:///{db_path}")
+
+        # Check column was added
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.execute("PRAGMA table_info(images)")
+        cols = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        assert "colorhash" in cols
+        assert "dhash" in cols
+        assert "ahash" in cols
+
+    def test_migrate_no_crash_on_complete_schema(self, tmp_path):
+        """Verify migration is a no-op when schema is already up to date."""
+        import sqlite3
+        db_path = tmp_path / "test_noop.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE images (
+                id INTEGER PRIMARY KEY,
+                filename VARCHAR, project_id INTEGER, file_path VARCHAR,
+                file_hash VARCHAR, phash VARCHAR, dhash VARCHAR,
+                ahash VARCHAR, whash VARCHAR, colorhash VARCHAR,
+                extracted_from VARCHAR, file_size INTEGER,
+                width INTEGER, height INTEGER, created_at DATETIME
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        import importlib
+        import app.main as main_mod
+        importlib.reload(main_mod)
+        # Should not raise
+        main_mod._migrate_db_schema(f"sqlite:///{db_path}")
+
+    def test_migrate_no_crash_on_missing_db(self):
+        """Verify migration gracefully handles non-existent DB file."""
+        import importlib
+        import app.main as main_mod
+        importlib.reload(main_mod)
+        main_mod._migrate_db_schema("sqlite:////tmp/does_not_exist_12345.db")

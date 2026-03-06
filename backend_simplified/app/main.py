@@ -651,6 +651,40 @@ async def health_check():
 
 
 # 启动事件
+def _migrate_db_schema(database_url: str):
+    """Auto-migrate SQLite schema: add missing columns to existing tables."""
+    import sqlite3
+    if not database_url.startswith("sqlite"):
+        return
+    db_path = database_url.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute("PRAGMA table_info(images)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        # Expected columns from the Image model (nullable optional fields)
+        expected_optional = {
+            "colorhash": "VARCHAR",
+            "dhash": "VARCHAR",
+            "ahash": "VARCHAR",
+            "whash": "VARCHAR",
+            "extracted_from": "VARCHAR",
+            "file_size": "INTEGER",
+            "width": "INTEGER",
+            "height": "INTEGER",
+        }
+        for col, col_type in expected_optional.items():
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE images ADD COLUMN {col} {col_type}")
+                logger.info(f"DB migration: added column images.{col}")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"DB migration failed: {e}")
+    finally:
+        conn.close()
+
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
@@ -659,8 +693,11 @@ async def startup_event():
     ensure_directory(EXTRACT_DIR)
     ensure_directory(STATIC_DIR)
 
-    # 初始化数据库（建表 + 兼容旧数据的路径规范化）
+    # Auto-migrate DB schema (add missing columns)
     database_url = get_database_url()
+    _migrate_db_schema(database_url)
+
+    # 初始化数据库（建表 + 兼容旧数据的路径规范化）
     session = get_session(database_url)
     try:
         changed = False
