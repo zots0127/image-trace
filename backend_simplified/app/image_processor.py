@@ -499,11 +499,33 @@ def resize_image_if_needed(
 
 
 # ============================================================================
-#  Tier 2: 像素/结构级比对
+#  Tier 2: 像素/结构级比对 — 含 per-file 特征缓存
 # ============================================================================
 
+# Per-file feature caches: keyed by (file_path, max_side) → numpy array
+# LRU eviction when > MAX_T2_CACHE entries to bound memory
+MAX_T2_CACHE = 200
+_GRAY_CACHE: Dict[Tuple[str, int], 'np.ndarray'] = {}
+_COLOR_CACHE: Dict[Tuple[str, int], 'np.ndarray'] = {}
+_HIST_CACHE: Dict[str, 'np.ndarray'] = {}       # path → normalized HSV histogram
+_T2_LOCK = threading.Lock()
+
+
+def _evict_if_needed(cache: dict, max_size: int = MAX_T2_CACHE):
+    """Simple eviction: drop first half when cache is full."""
+    if len(cache) > max_size:
+        keys = list(cache.keys())
+        for k in keys[:len(keys) // 2]:
+            del cache[k]
+
+
 def _load_gray_resized(path: str, max_side: int = 512) -> 'np.ndarray':
-    """加载灰度图并限制最大尺寸（加速 Tier 2 算法）。"""
+    """加载灰度图并限制最大尺寸（带内存缓存）。"""
+    key = (path, max_side)
+    with _T2_LOCK:
+        if key in _GRAY_CACHE:
+            return _GRAY_CACHE[key]
+
     _ensure_cv2()
     img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
     if img is None:
@@ -512,11 +534,20 @@ def _load_gray_resized(path: str, max_side: int = 512) -> 'np.ndarray':
     if max(h, w) > max_side:
         scale = max_side / max(h, w)
         img = cv2.resize(img, (int(w * scale), int(h * scale)))
+
+    with _T2_LOCK:
+        _evict_if_needed(_GRAY_CACHE)
+        _GRAY_CACHE[key] = img
     return img
 
 
 def _load_color_resized(path: str, max_side: int = 512) -> 'np.ndarray':
-    """加载彩色图并限制最大尺寸。"""
+    """加载彩色图并限制最大尺寸（带内存缓存）。"""
+    key = (path, max_side)
+    with _T2_LOCK:
+        if key in _COLOR_CACHE:
+            return _COLOR_CACHE[key]
+
     _ensure_cv2()
     img = cv2.imread(str(path))
     if img is None:
@@ -525,7 +556,41 @@ def _load_color_resized(path: str, max_side: int = 512) -> 'np.ndarray':
     if max(h, w) > max_side:
         scale = max_side / max(h, w)
         img = cv2.resize(img, (int(w * scale), int(h * scale)))
+
+    with _T2_LOCK:
+        _evict_if_needed(_COLOR_CACHE)
+        _COLOR_CACHE[key] = img
     return img
+
+
+def _get_cached_histogram(path: str) -> 'np.ndarray':
+    """计算并缓存 HSV H+S 二维直方图（per-file，避免重复计算）。"""
+    with _T2_LOCK:
+        if path in _HIST_CACHE:
+            return _HIST_CACHE[path]
+
+    _ensure_cv2()
+    img = _load_color_resized(path)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])
+    cv2.normalize(hist, hist)
+
+    with _T2_LOCK:
+        _evict_if_needed(_HIST_CACHE)
+        _HIST_CACHE[path] = hist
+    return hist
+
+
+def invalidate_feature_cache(path: str):
+    """清除指定文件的所有 Tier 2 特征缓存（用于文件删除/更新时）。"""
+    with _T2_LOCK:
+        keys_to_remove = [k for k in _GRAY_CACHE if k[0] == path]
+        for k in keys_to_remove:
+            del _GRAY_CACHE[k]
+        keys_to_remove = [k for k in _COLOR_CACHE if k[0] == path]
+        for k in keys_to_remove:
+            del _COLOR_CACHE[k]
+        _HIST_CACHE.pop(path, None)
 
 
 def calculate_ssim_similarity(path_a: str, path_b: str) -> float:
@@ -553,20 +618,11 @@ def calculate_histogram_similarity(path_a: str, path_b: str) -> float:
     """
     颜色直方图相关性（对色彩分布变化敏感）。
     使用 HSV 色彩空间的 H+S 通道，更符合人眼感知。
-    返回 0-1。
+    返回 0-1。使用 per-file 缓存的直方图特征。
     """
     _ensure_cv2()
-    img_a = _load_color_resized(path_a)
-    img_b = _load_color_resized(path_b)
-
-    hsv_a = cv2.cvtColor(img_a, cv2.COLOR_BGR2HSV)
-    hsv_b = cv2.cvtColor(img_b, cv2.COLOR_BGR2HSV)
-
-    # 计算 H+S 二维直方图
-    hist_a = cv2.calcHist([hsv_a], [0, 1], None, [50, 60], [0, 180, 0, 256])
-    hist_b = cv2.calcHist([hsv_b], [0, 1], None, [50, 60], [0, 180, 0, 256])
-    cv2.normalize(hist_a, hist_a)
-    cv2.normalize(hist_b, hist_b)
+    hist_a = _get_cached_histogram(path_a)
+    hist_b = _get_cached_histogram(path_b)
 
     # 相关性 [-1, 1] → 映射到 [0, 1]
     corr = cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL)
@@ -763,3 +819,166 @@ def compute_features_for_variants(image_path: str) -> List[Dict[str, Any]]:
                 pass
 
     return features_list
+
+
+# ============================================================================
+#  Pairwise Similarity Cache Layer
+# ============================================================================
+
+def _cache_key(file_hash_a: str, file_hash_b: str):
+    """Return ordered (min, max) hash pair to canonicalize A↔B."""
+    return (min(file_hash_a, file_hash_b), max(file_hash_a, file_hash_b))
+
+
+def get_or_compute_similarity(
+    *,
+    path_a: str,
+    path_b: str,
+    file_hash_a: str,
+    file_hash_b: str,
+    algorithm: str,
+    features_a: Dict[str, Any],
+    features_b: Dict[str, Any],
+    rotation_invariant: bool = False,
+    session=None,
+) -> float:
+    """
+    Central similarity computation with DB cache.
+
+    Cache key: (ordered_hash_a, ordered_hash_b, algorithm, rotation_invariant)
+    On cache hit  → returns stored score immediately.
+    On cache miss → computes, writes to similarity_cache, returns score.
+
+    Parameters
+    ----------
+    path_a, path_b       : full paths to image files
+    file_hash_a, file_hash_b : MD5 hashes from the Image table
+    algorithm            : one of ALL_ALGOS
+    features_a, features_b   : dict with phash/dhash/ahash/whash/colorhash
+    rotation_invariant   : whether to try 8 orientations
+    session              : SQLModel session for cache read/write (optional)
+    """
+    ha, hb = _cache_key(file_hash_a, file_hash_b)
+
+    # ---------- 1. Cache lookup ----------
+    if session is not None:
+        try:
+            from sqlmodel import select as _sel
+            from app.models import SimilarityCache
+            stmt = _sel(SimilarityCache).where(
+                SimilarityCache.hash_a == ha,
+                SimilarityCache.hash_b == hb,
+                SimilarityCache.algorithm == algorithm,
+                SimilarityCache.rotation_invariant == rotation_invariant,
+            )
+            cached = session.exec(stmt).first()
+            if cached is not None:
+                return cached.score
+        except Exception:
+            pass  # table might not exist yet; fall through
+
+    # ---------- 2. Compute ----------
+    score = _raw_similarity(path_a, path_b, algorithm, features_a, features_b)
+
+    if rotation_invariant:
+        try:
+            ri_score = calculate_rotation_invariant_similarity(
+                path_a, path_b, algorithm, features_a, features_b
+            )
+            score = max(score, ri_score)
+        except Exception:
+            pass
+
+    score = round(score, 4)
+
+    # ---------- 3. Cache write ----------
+    if session is not None:
+        try:
+            from app.models import SimilarityCache
+            entry = SimilarityCache(
+                hash_a=ha, hash_b=hb,
+                algorithm=algorithm,
+                rotation_invariant=rotation_invariant,
+                score=score,
+            )
+            session.add(entry)
+            session.commit()
+        except Exception:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+
+    return score
+
+
+def _raw_similarity(
+    path_a: str, path_b: str,
+    algorithm: str,
+    features_a: Dict[str, Any],
+    features_b: Dict[str, Any],
+) -> float:
+    """Compute similarity score without caching (pure computation)."""
+    if algorithm in HASH_ALGOS:
+        return calculate_similarity(
+            features_a.get(algorithm, ''),
+            features_b.get(algorithm, '')
+        )
+    elif algorithm in DESCRIPTOR_ALGOS:
+        desc_a, norm_a = get_cached_descriptor(
+            path_a, features_a.get('file_hash', ''), algorithm
+        )
+        desc_b, _ = get_cached_descriptor(
+            path_b, features_b.get('file_hash', ''), algorithm
+        )
+        return calculate_descriptor_similarity(desc_a, desc_b, norm_a)
+    elif algorithm == 'ssim':
+        return calculate_ssim_similarity(path_a, path_b)
+    elif algorithm == 'histogram':
+        return calculate_histogram_similarity(path_a, path_b)
+    elif algorithm == 'template':
+        return calculate_template_similarity(path_a, path_b)
+    elif algorithm == 'auto':
+        return calculate_hybrid_similarity(path_a, path_b, features_a, features_b)
+    return 0.0
+
+
+def calculate_rotation_invariant_similarity(
+    path_a: str, path_b: str,
+    algorithm: str,
+    features_a: Dict[str, Any],
+    features_b: Dict[str, Any],
+) -> float:
+    """Compare using 8 orientation variants, return the max score."""
+    if algorithm in HASH_ALGOS:
+        b_features_list = compute_features_for_variants(path_b)
+        best = 0.0
+        for bf in b_features_list:
+            s = calculate_similarity(
+                features_a.get(algorithm, ''),
+                bf.get(algorithm, '')
+            )
+            best = max(best, s)
+        return best
+    else:
+        def scorer(fa, fb):
+            return _raw_similarity(path_a, path_b, algorithm, fa, fb)
+        return compare_with_orientations(path_a, path_b, scorer, features_a=features_a)
+
+
+def invalidate_similarity_cache(session, file_hash: str):
+    """Remove all cached scores involving a specific image (e.g. on delete)."""
+    try:
+        from sqlmodel import select as _sel
+        from app.models import SimilarityCache
+        stmt = _sel(SimilarityCache).where(
+            (SimilarityCache.hash_a == file_hash) | (SimilarityCache.hash_b == file_hash)
+        )
+        for entry in session.exec(stmt).all():
+            session.delete(entry)
+        session.commit()
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass

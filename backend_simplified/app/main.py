@@ -19,8 +19,9 @@ from .utils import (
     is_supported_image_format, is_supported_document_format,
     compare_images_in_project
 )
-from .image_processor import compute_image_features, is_image_file, ALL_ALGOS
+from .image_processor import compute_image_features, is_image_file, ALL_ALGOS, HASH_ALGOS, DESCRIPTOR_ALGOS
 from .image_processor import draw_feature_matches
+from .image_processor import get_or_compute_similarity, invalidate_feature_cache, invalidate_similarity_cache
 from .document_parser import DocumentParser
 
 
@@ -545,15 +546,19 @@ async def pairwise_matrix(
 
     paths = [resolve(img.file_path) for img in images]
 
-    # Precompute features
+    # Use DB-stored hashes instead of recomputing from files
     features = []
-    for p in paths:
-        try:
-            features.append(compute_image_features(p))
-        except Exception:
-            features.append({})
+    for img in images:
+        features.append({
+            "phash": img.phash or "",
+            "dhash": img.dhash or "",
+            "ahash": img.ahash or "",
+            "whash": img.whash or "",
+            "colorhash": img.colorhash or "",
+            "file_hash": img.file_hash,
+        })
 
-    # Compute pairwise scores
+    # Compute pairwise scores (with similarity cache)
     matrix = [[0.0] * n for _ in range(n)]
     for i in range(n):
         matrix[i][i] = 1.0
@@ -561,25 +566,15 @@ async def pairwise_matrix(
     for i in range(n):
         for j in range(i + 1, n):
             try:
-                if hash_type in HASH_ALGOS:
-                    score = calculate_similarity(
-                        features[i].get(hash_type, ''),
-                        features[j].get(hash_type, '')
-                    )
-                elif hash_type in DESCRIPTOR_ALGOS:
-                    desc_a, norm_a = get_cached_descriptor(paths[i], images[i].file_hash, hash_type)
-                    desc_b, _ = get_cached_descriptor(paths[j], images[j].file_hash, hash_type)
-                    score = calculate_descriptor_similarity(desc_a, desc_b, norm_a)
-                elif hash_type == 'ssim':
-                    score = calculate_ssim_similarity(paths[i], paths[j])
-                elif hash_type == 'histogram':
-                    score = calculate_histogram_similarity(paths[i], paths[j])
-                elif hash_type == 'template':
-                    score = calculate_template_similarity(paths[i], paths[j])
-                elif hash_type == 'auto':
-                    score = calculate_hybrid_similarity(paths[i], paths[j], features[i], features[j])
-                else:
-                    score = 0.0
+                score = get_or_compute_similarity(
+                    path_a=paths[i], path_b=paths[j],
+                    file_hash_a=images[i].file_hash,
+                    file_hash_b=images[j].file_hash,
+                    algorithm=hash_type,
+                    features_a=features[i], features_b=features[j],
+                    rotation_invariant=rotation_invariant,
+                    session=session,
+                )
             except Exception:
                 score = 0.0
 
@@ -624,16 +619,23 @@ async def delete_image(
     if not image:
         raise HTTPException(status_code=404, detail="图像不存在")
 
-    # 删除文件
+    file_hash = image.file_hash
+    # Resolve full path for cache invalidation
+    full_path = None
     try:
         fp = image.file_path or ""
-        # 兼容旧数据：data/uploads/xxx
         if fp.startswith("data/"):
             fp = fp[len("data/"):]
         if fp:
+            full_path = str(STATIC_DIR / fp)
             (STATIC_DIR / fp).unlink(missing_ok=True)
     except Exception:
         pass  # 忽略文件删除错误
+
+    # Invalidate all caches for this image
+    if full_path:
+        invalidate_feature_cache(full_path)
+    invalidate_similarity_cache(session, file_hash)
 
     # 删除数据库记录
     session.delete(image)
@@ -872,38 +874,18 @@ async def generate_report(
     for i in range(n):
         matrix[i][i] = 1.0
 
-    HASH_ALGOS = {'phash', 'dhash', 'ahash', 'whash', 'colorhash'}
-    DESCRIPTOR_ALGOS = {'orb', 'brisk', 'sift', 'akaze', 'kaze'}
-
     for i in range(n):
         for j in range(i + 1, n):
             try:
-                if hash_type in HASH_ALGOS:
-                    score = calculate_similarity(
-                        features[i].get(hash_type, ''),
-                        features[j].get(hash_type, '')
-                    )
-                elif hash_type in DESCRIPTOR_ALGOS:
-                    desc_a, norm_a = get_cached_descriptor(paths[i], images[i].file_hash, hash_type)
-                    desc_b, _ = get_cached_descriptor(paths[j], images[j].file_hash, hash_type)
-                    score = calculate_descriptor_similarity(desc_a, desc_b, norm_a)
-                elif hash_type == 'ssim':
-                    score = calculate_ssim_similarity(paths[i], paths[j])
-                elif hash_type == 'histogram':
-                    score = calculate_histogram_similarity(paths[i], paths[j])
-                elif hash_type == 'template':
-                    score = calculate_template_similarity(paths[i], paths[j])
-                elif hash_type == 'auto':
-                    score = calculate_hybrid_similarity(paths[i], paths[j], features[i], features[j])
-                else:
-                    score = 0.0
-
-                if rotation_invariant:
-                    from app.image_processor import calculate_rotation_invariant_similarity
-                    ri_score = calculate_rotation_invariant_similarity(
-                        paths[i], paths[j], hash_type, features[i], features[j]
-                    )
-                    score = max(score, ri_score)
+                score = get_or_compute_similarity(
+                    path_a=paths[i], path_b=paths[j],
+                    file_hash_a=images[i].file_hash,
+                    file_hash_b=images[j].file_hash,
+                    algorithm=hash_type,
+                    features_a=features[i], features_b=features[j],
+                    rotation_invariant=rotation_invariant,
+                    session=session,
+                )
             except Exception:
                 score = 0.0
 
@@ -1076,6 +1058,22 @@ def _migrate_db_schema(database_url: str):
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE images ADD COLUMN {col} {col_type}")
                 print(f"DB migration: added column images.{col}")
+        # Create similarity_cache table if not exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS similarity_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hash_a VARCHAR(32),
+                hash_b VARCHAR(32),
+                algorithm VARCHAR(32),
+                rotation_invariant BOOLEAN DEFAULT 0,
+                score REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Create indexes for fast lookup
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_simcache_a ON similarity_cache(hash_a)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_simcache_b ON similarity_cache(hash_b)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_simcache_algo ON similarity_cache(algorithm)")
         conn.commit()
     except Exception as e:
         print(f"DB migration warning: {e}")

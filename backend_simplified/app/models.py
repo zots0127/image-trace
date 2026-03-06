@@ -92,3 +92,20 @@ class AnalysisRun(SQLModel, table=True):
     unique_count: int
     summary: Optional[str] = Field(default=None, sa_column=Column(TEXT))
     created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+
+
+class SimilarityCache(SQLModel, table=True):
+    """
+    缓存配对相似度分数，避免重复计算。
+    缓存键: (hash_a, hash_b, algorithm, rotation_invariant)
+    注意: hash_a/hash_b 始终按字典序存储 (min, max)，确保 A↔B 只存一份。
+    """
+    __tablename__ = "similarity_cache"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    hash_a: str = Field(index=True, max_length=32)     # min(file_hash_A, file_hash_B)
+    hash_b: str = Field(index=True, max_length=32)     # max(file_hash_A, file_hash_B)
+    algorithm: str = Field(index=True, max_length=32)   # phash/sift/ssim/auto/...
+    rotation_invariant: bool = Field(default=False)     # 是否使用旋转不变性
+    score: float                                         # similarity score 0-1
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
