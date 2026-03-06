@@ -172,3 +172,6 @@ test_uploads/
 desktop/backend_bin/
 desktop/.pyinstaller-build/
 desktop/.pyinstaller-spec/
+/backend_simplified/data/
+/to test/
+/to test.zip

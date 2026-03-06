@@ -38,6 +38,7 @@ class ImageBase(SQLModel):
     dhash: Optional[str] = Field(default=None, max_length=64)  # Difference hash
     ahash: Optional[str] = Field(default=None, max_length=64)  # Average hash
     whash: Optional[str] = Field(default=None, max_length=64)  # Wavelet hash
+    colorhash: Optional[str] = Field(default=None, max_length=64)  # Color hash
     extracted_from: Optional[str] = Field(default=None, max_length=255)  # 来源文档名
     file_size: Optional[int] = None  # 文件大小（字节）
     width: Optional[int] = None      # 图片宽度

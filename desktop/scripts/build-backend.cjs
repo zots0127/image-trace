@@ -101,6 +101,11 @@ run(py, [
   '--collect-all', 'fitz',
   '--collect-all', 'imagehash',
   '--collect-all', 'sqlmodel',
+  '--hidden-import', 'pillow_heif',
+  '--hidden-import', 'pillow_avif',
+  '--hidden-import', 'rawpy',
+  '--hidden-import', 'skimage',
+  '--hidden-import', 'skimage.metrics',
   entry,
 ], backendDir);
 

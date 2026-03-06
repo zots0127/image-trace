@@ -18,7 +18,7 @@ from .utils import (
     is_supported_image_format, is_supported_document_format,
     compare_images_in_project
 )
-from .image_processor import compute_image_features, is_image_file
+from .image_processor import compute_image_features, is_image_file, ALL_ALGOS
 from .image_processor import draw_feature_matches
 from .document_parser import DocumentParser
 
@@ -359,8 +359,8 @@ async def compare_project_images(
     if not 0 <= threshold <= 1:
         raise HTTPException(status_code=400, detail="阈值必须在0-1之间")
 
-    if hash_type not in ['orb', 'brisk', 'sift']:
-        raise HTTPException(status_code=400, detail="不支持的哈希类型")
+    if hash_type not in ALL_ALGOS:
+        raise HTTPException(status_code=400, detail=f"不支持的比对算法: {hash_type}。支持: {', '.join(sorted(ALL_ALGOS))}")
 
     try:
         # 执行比对

@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- Python + Backend ----------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend_simplified/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r backend_simplified/requirements.txt
+          pip install pyinstaller
+
+      # ---------- Node + Frontend ----------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Install Desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      # ---------- Build ----------
+      - name: Build frontend
+        working-directory: desktop
+        run: npm run build:frontend
+
+      - name: Build backend (PyInstaller)
+        working-directory: desktop
+        run: npm run build:backend
+
+      - name: Package with electron-builder
+        working-directory: desktop
+        run: node scripts/build-dist.cjs pyinstaller
+
+      # ---------- Upload ----------
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.exe
+            desktop/dist/*.AppImage
+          if-no-files-found: warn
+
+  # ---------- Publish GitHub Release ----------
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage

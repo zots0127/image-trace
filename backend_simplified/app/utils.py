@@ -14,6 +14,12 @@ from .image_processor import (
     calculate_similarity,
     calculate_descriptor_similarity,
     get_cached_descriptor,
+    calculate_ssim_similarity,
+    calculate_histogram_similarity,
+    calculate_template_similarity,
+    calculate_hybrid_similarity,
+    compute_image_features,
+    HASH_ALGOS, PIXEL_ALGOS, DESCRIPTOR_ALGOS, FUSION_ALGOS, ALL_ALGOS,
 )
 
 # 静态文件根目录（存储 uploads/extracted），默认 data
@@ -120,10 +126,10 @@ def format_file_size(size_bytes: int) -> str:
 
 
 def is_supported_image_format(filename: str) -> bool:
-    """检查是否为支持的图像格式"""
-    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+    """检查是否为支持的图像格式（全品种）"""
+    from .image_processor import SUPPORTED_IMAGE_EXTENSIONS
     _, ext = os.path.splitext(filename.lower())
-    return ext in image_extensions
+    return ext in SUPPORTED_IMAGE_EXTENSIONS
 
 
 def is_supported_document_format(filename: str) -> bool:
@@ -253,6 +259,7 @@ def compare_images_in_project(
             'dhash': img.dhash,
             'ahash': img.ahash,
             'whash': img.whash,
+            'colorhash': getattr(img, 'colorhash', None),
             'extracted_from': img.extracted_from,
             'file_size': img.file_size,
             'width': img.width,
@@ -262,8 +269,7 @@ def compare_images_in_project(
         image_dicts.append(image_dict)
 
     # 特征类算法需要读取文件计算描述子
-    descriptor_algos = ['orb', 'brisk', 'sift']
-    if hash_type in descriptor_algos:
+    if hash_type in DESCRIPTOR_ALGOS:
         for img in image_dicts:
             try:
                 fp = STATIC_DIR / img['file_path']
@@ -275,17 +281,46 @@ def compare_images_in_project(
                 img['descriptor_norm'] = None
 
     # 执行相似度分组
-    if hash_type in descriptor_algos:
+    if hash_type in DESCRIPTOR_ALGOS:
         def scorer(a: dict, b: dict) -> float:
-            desc_sim = calculate_descriptor_similarity(
+            return calculate_descriptor_similarity(
                 a.get('descriptor'),
                 b.get('descriptor'),
-                a.get('descriptor_norm') or b.get('descriptor_norm') or 4  # 默认 NORM_L2=4
+                a.get('descriptor_norm') or b.get('descriptor_norm') or 4
             )
-            return desc_sim
-
         groups, ungrouped = group_similar_by_metric(image_dicts, threshold, scorer)
+
+    elif hash_type in PIXEL_ALGOS:
+        # Tier 2: 像素/结构级比对
+        pixel_fn_map = {
+            'ssim': calculate_ssim_similarity,
+            'histogram': calculate_histogram_similarity,
+            'template': calculate_template_similarity,
+        }
+        pixel_fn = pixel_fn_map[hash_type]
+
+        def scorer(a: dict, b: dict) -> float:
+            try:
+                pa = str(STATIC_DIR / a['file_path'])
+                pb = str(STATIC_DIR / b['file_path'])
+                return pixel_fn(pa, pb)
+            except Exception:
+                return 0.0
+        groups, ungrouped = group_similar_by_metric(image_dicts, threshold, scorer)
+
+    elif hash_type in FUSION_ALGOS:
+        # 融合模式 (auto)
+        def scorer(a: dict, b: dict) -> float:
+            try:
+                pa = str(STATIC_DIR / a['file_path'])
+                pb = str(STATIC_DIR / b['file_path'])
+                return calculate_hybrid_similarity(pa, pb, a, b)
+            except Exception:
+                return 0.0
+        groups, ungrouped = group_similar_by_metric(image_dicts, threshold, scorer)
+
     else:
+        # Tier 1: 哈希类算法
         groups, ungrouped = group_similar_images(image_dicts, threshold, hash_type)
 
     # 转换为响应格式
@@ -293,17 +328,16 @@ def compare_images_in_project(
     for group in groups:
         # 计算组的平均相似度
         if len(group) > 1:
-            # 计算所有图片对之间的平均相似度
             total_similarity = 0
             count = 0
             for i in range(len(group)):
                 for j in range(i + 1, len(group)):
-                    if hash_type in descriptor_algos:
+                    if hash_type in DESCRIPTOR_ALGOS or hash_type in PIXEL_ALGOS or hash_type in FUSION_ALGOS:
                         similarity = scorer(group[i], group[j])
                     else:
                         similarity = calculate_similarity(
-                            group[i][hash_type],
-                            group[j][hash_type]
+                            group[i].get(hash_type, ''),
+                            group[j].get(hash_type, '')
                         )
                     total_similarity += similarity
                     count += 1
@@ -324,6 +358,7 @@ def compare_images_in_project(
                 dhash=img_dict.get('dhash'),
                 ahash=img_dict.get('ahash'),
                 whash=img_dict.get('whash'),
+                colorhash=img_dict.get('colorhash'),
                 extracted_from=img_dict.get('extracted_from'),
                 file_size=img_dict.get('file_size'),
                 width=img_dict.get('width'),

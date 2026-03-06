@@ -5,9 +5,13 @@ sqlmodel==0.0.14
 python-multipart==0.0.9
 
 # 图像处理
-Pillow==10.2.0
+Pillow>=11.1.0
 imagehash==4.3.1
+scikit-image
 opencv-contrib-python-headless==4.10.0.84
+pillow-heif
+pillow-avif-plugin
+rawpy
 
 # PDF处理
 PyMuPDF==1.23.18
