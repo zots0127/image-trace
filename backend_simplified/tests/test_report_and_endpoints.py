@@ -92,7 +92,8 @@ class TestAnalysisRuns:
     """Tests for GET /analysis_runs/{project_id} and /analysis_runs/detail/{id}"""
 
     def _run_compare(self, client, pid):
-        client.post(f"/compare/{pid}", data={"threshold": "0.85", "hash_type": "orb"})
+        # Use phash (works on solid-color test images; ORB would find 0 keypoints)
+        client.post(f"/compare/{pid}", data={"threshold": "0.5", "hash_type": "phash"})
 
     def test_list_runs_empty(self, client):
         resp = client.post("/projects", json={"name": "RunsEmpty"})
@@ -104,21 +105,26 @@ class TestAnalysisRuns:
     def test_list_runs_after_compare(self, client):
         resp = client.post("/projects", json={"name": "RunsAfter"})
         pid = resp.json()["id"]
-        file_tuple = make_upload_bytes("run_test.png", color=(100, 100, 100))
-        client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        # Use slightly different colors: different file_hash but same phash
+        file1 = make_upload_bytes("run_test1.png", color=(100, 100, 100))
+        file2 = make_upload_bytes("run_test2.png", color=(101, 100, 100))
+        client.post("/upload", data={"project_id": str(pid)}, files={"file": file1})
+        client.post("/upload", data={"project_id": str(pid)}, files={"file": file2})
         self._run_compare(client, pid)
         resp = client.get(f"/analysis_runs?project_id={pid}")
         assert resp.status_code == 200
         runs = resp.json()
         assert len(runs) >= 1
         assert runs[0]["project_id"] == pid
-        assert runs[0]["hash_type"] == "orb"
+        assert runs[0]["hash_type"] == "phash"
 
     def test_run_detail(self, client):
         resp = client.post("/projects", json={"name": "RunDetail"})
         pid = resp.json()["id"]
-        file_tuple = make_upload_bytes("detail_test.png", color=(50, 50, 50))
-        client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
+        file1 = make_upload_bytes("detail1.png", color=(50, 50, 50))
+        file2 = make_upload_bytes("detail2.png", color=(51, 50, 50))
+        client.post("/upload", data={"project_id": str(pid)}, files={"file": file1})
+        client.post("/upload", data={"project_id": str(pid)}, files={"file": file2})
         self._run_compare(client, pid)
         runs = client.get(f"/analysis_runs?project_id={pid}").json()
         run_id = runs[0]["id"]
@@ -165,11 +171,11 @@ class TestDownload:
         upload_resp = client.post("/upload", data={"project_id": str(pid)}, files={"file": file_tuple})
         img_data = upload_resp.json()["processed_images"][0]
         file_path = img_data.get("file_path", "")
-        resp = client.get(f"/download?file_path={file_path}")
+        resp = client.get(f"/download/{file_path}")
         assert resp.status_code == 200
 
     def test_download_not_found(self, client):
-        resp = client.get("/download?file_path=nonexistent/file.png")
+        resp = client.get("/download/nonexistent/file.png")
         assert resp.status_code == 404
 
 

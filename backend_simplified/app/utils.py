@@ -447,7 +447,7 @@ def compare_images_in_project(
             total_images=len(images),
             groups_count=len(similar_groups),
             unique_count=len(unique_images),
-            summary=json.dumps(result.model_dump())
+            summary=json.dumps(result.model_dump(), default=str)
         )
         session.add(run)
         session.commit()
@@ -456,6 +456,8 @@ def compare_images_in_project(
         result_dict = result.model_dump()
         result_dict["run_id"] = run.id
         return ComparisonResult.model_validate(result_dict)
-    except Exception:
+    except Exception as e:
         # 持久化失败不影响主流程
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to save AnalysisRun: {e}")
         return result

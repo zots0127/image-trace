@@ -411,7 +411,14 @@ async def get_comparison_results(
     """
     获取项目的比对结果（同POST /compare，但使用GET方法）
     """
-    return await compare_project_images(project_id, threshold, hash_type, BackgroundTasks(), session)
+    return await compare_project_images(
+        project_id=project_id,
+        threshold=threshold,
+        hash_type=hash_type,
+        rotation_invariant=False,
+        background_tasks=BackgroundTasks(),
+        session=session,
+    )
 
 
 @app.get("/analysis_runs")
