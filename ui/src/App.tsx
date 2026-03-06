@@ -12,6 +12,7 @@ import LandingPage from "./pages/LandingPage";
 import Demo from "./pages/Demo";
 import Dashboard from "./pages/Dashboard";
 import ProjectDetail from "./pages/ProjectDetail";
+import DuplicateReport from "./pages/DuplicateReport";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -34,7 +35,7 @@ const App = () => {
                   <Route path="/landing" element={<LandingPage />} />
                   <Route path="/demo" element={<Demo />} />
                   <Route path="/auth" element={<Auth />} />
-                  
+
                   {/* Protected Routes */}
                   <Route
                     path="/dashboard"
@@ -52,10 +53,18 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
-                  
+                  <Route
+                    path="/report/:projectId"
+                    element={
+                      <ProtectedRoute>
+                        <DuplicateReport />
+                      </ProtectedRoute>
+                    }
+                  />
+
                   {/* Redirect root to dashboard */}
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                  
+
                   {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                   <Route path="*" element={<NotFound />} />
                 </Routes>

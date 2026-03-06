@@ -265,14 +265,24 @@ export default function ProjectDetail() {
               )}
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadProject}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            {t("project.refresh")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => navigate(`/report/${projectId}`)}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              {t("project.generateReport") || "Generate Report"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadProject}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              {t("project.refresh")}
+            </Button>
+          </div>
         </div>
 
         {/* System Health */}

@@ -799,6 +799,244 @@ async def get_match_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Match computation failed: {e}")
 
+@app.get("/report/{project_id}")
+async def generate_report(
+    project_id: int,
+    hash_type: str = "sift",
+    threshold: float = 0.85,
+    rotation_invariant: bool = False,
+    session: Session = Depends(get_db)
+):
+    """
+    Generate a comprehensive duplicate detection report:
+    - Project metadata
+    - Image list with thumbnail URLs
+    - Pairwise similarity matrix
+    - Similar groups with per-pair match data (keypoints + matches)
+    - Summary statistics
+    """
+    import cv2
+    import numpy as np
+
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    images = session.exec(
+        select(Image).where(Image.project_id == project_id)
+    ).all()
+
+    if not images:
+        return {
+            "project": {"id": project.id, "name": project.name, "description": project.description},
+            "generated_at": datetime.utcnow().isoformat(),
+            "algorithm": hash_type,
+            "threshold": threshold,
+            "rotation_invariant": rotation_invariant,
+            "images": [],
+            "matrix": {"names": [], "image_ids": [], "values": []},
+            "groups": [],
+            "summary": {"total_images": 0, "similar_groups": 0, "unique_images": 0, "duplicate_rate": 0},
+        }
+
+    # --- 1. Build image metadata ---
+    image_meta = []
+    for img in images:
+        image_meta.append({
+            "id": img.id,
+            "filename": img.filename,
+            "width": img.width,
+            "height": img.height,
+            "file_size": img.file_size,
+        })
+
+    # --- 2. Pairwise matrix ---
+    n = len(images)
+    paths = []
+    features = []
+    for img in images:
+        fp = img.file_path or ""
+        if fp.startswith("data/"):
+            fp = fp[len("data/"):]
+        paths.append(str(STATIC_DIR / fp))
+        features.append({
+            "phash": img.phash or "",
+            "dhash": img.dhash or "",
+            "ahash": img.ahash or "",
+            "whash": img.whash or "",
+            "colorhash": img.colorhash or "",
+        })
+
+    matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        matrix[i][i] = 1.0
+
+    HASH_ALGOS = {'phash', 'dhash', 'ahash', 'whash', 'colorhash'}
+    DESCRIPTOR_ALGOS = {'orb', 'brisk', 'sift', 'akaze', 'kaze'}
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            try:
+                if hash_type in HASH_ALGOS:
+                    score = calculate_similarity(
+                        features[i].get(hash_type, ''),
+                        features[j].get(hash_type, '')
+                    )
+                elif hash_type in DESCRIPTOR_ALGOS:
+                    desc_a, norm_a = get_cached_descriptor(paths[i], images[i].file_hash, hash_type)
+                    desc_b, _ = get_cached_descriptor(paths[j], images[j].file_hash, hash_type)
+                    score = calculate_descriptor_similarity(desc_a, desc_b, norm_a)
+                elif hash_type == 'ssim':
+                    score = calculate_ssim_similarity(paths[i], paths[j])
+                elif hash_type == 'histogram':
+                    score = calculate_histogram_similarity(paths[i], paths[j])
+                elif hash_type == 'template':
+                    score = calculate_template_similarity(paths[i], paths[j])
+                elif hash_type == 'auto':
+                    score = calculate_hybrid_similarity(paths[i], paths[j], features[i], features[j])
+                else:
+                    score = 0.0
+
+                if rotation_invariant:
+                    from app.image_processor import calculate_rotation_invariant_similarity
+                    ri_score = calculate_rotation_invariant_similarity(
+                        paths[i], paths[j], hash_type, features[i], features[j]
+                    )
+                    score = max(score, ri_score)
+            except Exception:
+                score = 0.0
+
+            matrix[i][j] = round(score, 4)
+            matrix[j][i] = round(score, 4)
+
+    # --- 3. Find similar groups ---
+    from app.utils import group_similar_images as _group
+    group_input = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if matrix[i][j] >= threshold:
+                group_input.append((images[i].id, images[j].id, matrix[i][j]))
+
+    # Build groups using union-find
+    parent = {}
+    def find(x):
+        while parent.get(x, x) != x:
+            parent[x] = parent.get(parent[x], parent[x])
+            x = parent[x]
+        return x
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    group_scores = {}
+    for a_id, b_id, score in group_input:
+        union(a_id, b_id)
+        group_scores[(a_id, b_id)] = score
+
+    clusters = {}
+    for img in images:
+        root = find(img.id)
+        if root not in clusters:
+            clusters[root] = []
+        clusters[root].append(img)
+
+    # --- 4. Build groups with match data ---
+    groups = []
+    group_id = 0
+    for root, imgs in clusters.items():
+        if len(imgs) < 2:
+            continue
+        group_id += 1
+
+        # Compute match data for each pair in the group
+        pair_matches = []
+        for a_idx in range(len(imgs)):
+            for b_idx in range(a_idx + 1, len(imgs)):
+                a, b = imgs[a_idx], imgs[b_idx]
+                pair_score = group_scores.get((a.id, b.id), group_scores.get((b.id, a.id), 0))
+
+                match_info = {"image_a_id": a.id, "image_b_id": b.id, "score": pair_score, "matches": [], "keypoints_a": [], "keypoints_b": []}
+
+                # Only compute keypoint matches for descriptor algorithms
+                if hash_type in DESCRIPTOR_ALGOS:
+                    try:
+                        fp_a = a.file_path or ""
+                        fp_b = b.file_path or ""
+                        if fp_a.startswith("data/"): fp_a = fp_a[len("data/"):]
+                        if fp_b.startswith("data/"): fp_b = fp_b[len("data/"):]
+
+                        im_a = cv2.imread(str(STATIC_DIR / fp_a))
+                        im_b = cv2.imread(str(STATIC_DIR / fp_b))
+                        if im_a is not None and im_b is not None:
+                            gray_a = cv2.cvtColor(im_a, cv2.COLOR_BGR2GRAY)
+                            gray_b = cv2.cvtColor(im_b, cv2.COLOR_BGR2GRAY)
+
+                            if hash_type == "sift": detector = cv2.SIFT_create()
+                            elif hash_type == "orb": detector = cv2.ORB_create(nfeatures=500)
+                            elif hash_type == "brisk": detector = cv2.BRISK_create()
+                            elif hash_type == "akaze": detector = cv2.AKAZE_create()
+                            elif hash_type == "kaze": detector = cv2.KAZE_create()
+                            else: detector = cv2.ORB_create()
+
+                            kp_a, desc_a = detector.detectAndCompute(gray_a, None)
+                            kp_b, desc_b = detector.detectAndCompute(gray_b, None)
+
+                            if desc_a is not None and desc_b is not None and len(desc_a) > 0 and len(desc_b) > 0:
+                                norm = cv2.NORM_L2 if hash_type in ("sift", "kaze") else cv2.NORM_HAMMING
+                                bf = cv2.BFMatcher(norm)
+                                raw = bf.knnMatch(desc_a, desc_b, k=2)
+                                good = []
+                                for mp in raw:
+                                    if len(mp) == 2 and mp[0].distance < 0.75 * mp[1].distance:
+                                        good.append(mp[0])
+                                good.sort(key=lambda x: x.distance)
+                                good = good[:50]
+
+                                match_info["keypoints_a"] = [{"x": round(kp.pt[0], 1), "y": round(kp.pt[1], 1)} for kp in kp_a[:200]]
+                                match_info["keypoints_b"] = [{"x": round(kp.pt[0], 1), "y": round(kp.pt[1], 1)} for kp in kp_b[:200]]
+                                match_info["matches"] = [{"a_idx": m.queryIdx, "b_idx": m.trainIdx, "distance": round(m.distance, 2)} for m in good]
+                                match_info["image_a_size"] = {"width": im_a.shape[1], "height": im_a.shape[0]}
+                                match_info["image_b_size"] = {"width": im_b.shape[1], "height": im_b.shape[0]}
+                    except Exception:
+                        pass
+
+                pair_matches.append(match_info)
+
+        avg_score = sum(p["score"] for p in pair_matches) / max(len(pair_matches), 1)
+        groups.append({
+            "group_id": group_id,
+            "similarity_score": round(avg_score, 4),
+            "images": [{"id": img.id, "filename": img.filename} for img in imgs],
+            "pair_matches": pair_matches,
+        })
+
+    unique_ids = {img.id for img in images} - {img.id for g in groups for img_d in g["images"] for img in [type('', (), img_d)()]}
+    unique_count = n - sum(len(g["images"]) for g in groups)
+
+    duplicate_rate = round((n - unique_count) / n * 100, 1) if n > 0 else 0
+
+    return {
+        "project": {"id": project.id, "name": project.name, "description": project.description},
+        "generated_at": datetime.utcnow().isoformat(),
+        "algorithm": hash_type,
+        "threshold": threshold,
+        "rotation_invariant": rotation_invariant,
+        "images": image_meta,
+        "matrix": {
+            "names": [img.filename for img in images],
+            "image_ids": [img.id for img in images],
+            "values": matrix,
+        },
+        "groups": groups,
+        "summary": {
+            "total_images": n,
+            "similar_groups": len(groups),
+            "unique_images": unique_count,
+            "duplicate_rate": duplicate_rate,
+        },
+    }
+
 
 @app.get("/health")
 async def health_check():
@@ -836,10 +1074,10 @@ def _migrate_db_schema(database_url: str):
         for col, col_type in expected_optional.items():
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE images ADD COLUMN {col} {col_type}")
-                logger.info(f"DB migration: added column images.{col}")
+                print(f"DB migration: added column images.{col}")
         conn.commit()
     except Exception as e:
-        logger.warning(f"DB migration failed: {e}")
+        print(f"DB migration warning: {e}")
     finally:
         conn.close()
 
