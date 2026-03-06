@@ -43,6 +43,7 @@ class ImageBase(SQLModel):
     file_size: Optional[int] = None  # 文件大小（字节）
     width: Optional[int] = None      # 图片宽度
     height: Optional[int] = None     # 图片高度
+    feature_status: Optional[str] = Field(default="pending", max_length=16)  # pending/computing/ready
 
 
 class Image(ImageBase, table=True):
@@ -103,9 +104,26 @@ class SimilarityCache(SQLModel, table=True):
     __tablename__ = "similarity_cache"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    hash_a: str = Field(index=True, max_length=32)     # min(file_hash_A, file_hash_B)
-    hash_b: str = Field(index=True, max_length=32)     # max(file_hash_A, file_hash_B)
-    algorithm: str = Field(index=True, max_length=32)   # phash/sift/ssim/auto/...
-    rotation_invariant: bool = Field(default=False)     # 是否使用旋转不变性
-    score: float                                         # similarity score 0-1
+    hash_a: str = Field(index=True, max_length=32)
+    hash_b: str = Field(index=True, max_length=32)
+    algorithm: str = Field(index=True, max_length=32)
+    rotation_invariant: bool = Field(default=False)
+    score: float
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+
+
+class FeatureStore(SQLModel, table=True):
+    """
+    预计算特征矩阵存储。
+    每张图像 × 8变体 × N算法 → 固定维度特征向量(BLOB)。
+    比对时直接加载向量做矩阵运算，毫秒级出结果。
+    """
+    __tablename__ = "feature_store"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    image_id: int = Field(index=True, foreign_key="images.id")
+    variant_idx: int = Field(default=0)        # 0=原图, 1-7=旋转翻转变体
+    algorithm: str = Field(max_length=32)       # phash_bits/sift_pooled/histogram_hsv/...
+    vector: bytes = Field(sa_column=Column("vector", TEXT))  # numpy→base64 bytes
+    dimensions: int                             # 向量维度
     created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)

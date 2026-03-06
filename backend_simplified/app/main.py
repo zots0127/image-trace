@@ -22,6 +22,10 @@ from .utils import (
 from .image_processor import compute_image_features, is_image_file, ALL_ALGOS, HASH_ALGOS, DESCRIPTOR_ALGOS
 from .image_processor import draw_feature_matches
 from .image_processor import get_or_compute_similarity, invalidate_feature_cache, invalidate_similarity_cache
+from .feature_matrix import (
+    precompute_feature_matrix, compute_similarity_matrix_fast,
+    are_features_ready, ALGO_TO_FEATURE,
+)
 from .document_parser import DocumentParser
 
 
@@ -164,10 +168,23 @@ async def delete_project(
     return {"message": "项目已删除"}
 
 
+def _bg_precompute_features(image_id: int, image_path: str):
+    """Background task: precompute feature matrix for a single image."""
+    from sqlmodel import Session as _Session
+    from sqlalchemy import create_engine as _ce
+    try:
+        engine = _ce(get_database_url())
+        with _Session(engine) as session:
+            precompute_feature_matrix(image_id, image_path, session)
+    except Exception as e:
+        print(f"Background precompute failed for image {image_id}: {e}")
+
+
 @app.post("/upload")
 async def upload_file(
     project_id: int = Form(...),
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     session: Session = Depends(get_db)
 ):
     """
@@ -235,6 +252,12 @@ async def upload_file(
                 'file_path': db_image.file_path,
                 'type': 'direct_upload'
             })
+
+            # Trigger async feature matrix precomputation
+            if background_tasks:
+                background_tasks.add_task(
+                    _bg_precompute_features, db_image.id, str(saved_path)
+                )
 
         elif is_supported_document_format(file.filename):
             # 处理文档文件
@@ -539,6 +562,23 @@ async def pairwise_matrix(
     names = [img.filename for img in images]
     ids = [img.id for img in images]
 
+    # ---- Fast path: use pre-computed feature matrix ----
+    feature_name = ALGO_TO_FEATURE.get(hash_type)
+    if feature_name and are_features_ready(session, ids):
+        try:
+            sim_matrix = compute_similarity_matrix_fast(
+                session, ids, hash_type, rotation_invariant
+            )
+            matrix = [[round(float(sim_matrix[i, j]), 4) for j in range(n)] for i in range(n)]
+            return {
+                "names": names, "image_ids": ids,
+                "matrix": matrix, "algorithm": hash_type,
+                "engine": "matrix",
+            }
+        except Exception:
+            pass  # fall through to legacy path
+
+    # ---- Legacy path: per-pair computation ----
     def resolve(fp):
         if fp and fp.startswith("data/"):
             fp = fp[len("data/"):]
@@ -546,7 +586,6 @@ async def pairwise_matrix(
 
     paths = [resolve(img.file_path) for img in images]
 
-    # Use DB-stored hashes instead of recomputing from files
     features = []
     for img in images:
         features.append({
@@ -558,7 +597,6 @@ async def pairwise_matrix(
             "file_hash": img.file_hash,
         })
 
-    # Compute pairwise scores (with similarity cache)
     matrix = [[0.0] * n for _ in range(n)]
     for i in range(n):
         matrix[i][i] = 1.0
@@ -582,10 +620,29 @@ async def pairwise_matrix(
             matrix[j][i] = round(score, 4)
 
     return {
-        "names": names,
-        "image_ids": ids,
-        "matrix": matrix,
-        "algorithm": hash_type,
+        "names": names, "image_ids": ids,
+        "matrix": matrix, "algorithm": hash_type,
+        "engine": "legacy",
+    }
+
+
+@app.get("/feature_status/{project_id}")
+async def feature_status(
+    project_id: int,
+    session: Session = Depends(get_db)
+):
+    """Check feature precomputation status for all images in a project."""
+    statement = select(Image).where(Image.project_id == project_id)
+    images = session.exec(statement).all()
+    statuses = [{"id": img.id, "filename": img.filename, "status": img.feature_status or "pending"} for img in images]
+    total = len(statuses)
+    ready = sum(1 for s in statuses if s["status"] == "ready")
+    return {
+        "project_id": project_id,
+        "total": total,
+        "ready": ready,
+        "all_ready": ready == total and total > 0,
+        "images": statuses,
     }
 
 
@@ -1074,6 +1131,25 @@ def _migrate_db_schema(database_url: str):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_simcache_a ON similarity_cache(hash_a)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_simcache_b ON similarity_cache(hash_b)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_simcache_algo ON similarity_cache(algorithm)")
+        # Create feature_store table if not exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS feature_store (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                image_id INTEGER NOT NULL REFERENCES images(id),
+                variant_idx INTEGER NOT NULL DEFAULT 0,
+                algorithm VARCHAR(32) NOT NULL,
+                vector TEXT NOT NULL,
+                dimensions INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(image_id, variant_idx, algorithm)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fs_image ON feature_store(image_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fs_algo ON feature_store(algorithm)")
+        # Add feature_status column to images if missing
+        if 'feature_status' not in existing_cols:
+            conn.execute("ALTER TABLE images ADD COLUMN feature_status VARCHAR(16) DEFAULT 'pending'")
+            print("DB migration: added column images.feature_status")
         conn.commit()
     except Exception as e:
         print(f"DB migration warning: {e}")
