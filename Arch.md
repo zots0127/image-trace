@@ -94,3 +94,41 @@ graph TB
 | `DuplicateReport.tsx` | Full report page with print/PDF export |
 | `ImageUploadZone.tsx` | Drag-and-drop image upload |
 | `DocumentUploadZone.tsx` | Document upload + extraction |
+
+## Desktop Packaging (Electron)
+
+```mermaid
+graph LR
+    subgraph Build["Build Pipeline"]
+        PY[PyInstaller --onedir] --> BIN_PY[backend_bin/image-trace-backend-pyinstaller/]
+        NU[Nuitka --standalone] --> BIN_NU[backend_bin/image-trace-backend-nuitka/]
+    end
+
+    subgraph Package["electron-builder"]
+        EB[extraResources] --> RES[resources/backend_bin/<flavor>/exe + deps]
+        ASAR[asar + asarUnpack] --> DLL[*.dll, *.so, *.dylib unpacked]
+    end
+
+    subgraph Runtime["main.js Startup"]
+        RESOLVE[resolveBackendBinary] --> |directory mode| DIR[backend_bin/<flavor>/<exe>]
+        RESOLVE --> |legacy fallback| FLAT[backend_bin/<exe>]
+        SPAWN[spawn backend] --> HEALTH[waitForHealth /health]
+        HEALTH --> READY[Backend ready]
+    end
+
+    Build --> Package --> Runtime
+```
+
+### Binary Resolution Order
+1. `backend_bin/image-trace-backend-nuitka/<exe>` (directory mode)
+2. `backend_bin/image-trace-backend-pyinstaller/<exe>` (directory mode)
+3. `backend_bin/image-trace-backend-nuitka<exe>` (legacy flat)
+4. `backend_bin/image-trace-backend-pyinstaller<exe>` (legacy flat)
+5. `backend_bin/image-trace-backend<exe>` (legacy name)
+
+### CI/CD
+- Trigger: `git push origin v*` tag
+- Platforms: macOS (arm64), Windows (x64), Ubuntu (x64)
+- Dual-track: PyInstaller + Nuitka per platform
+- Artifacts: retention 1 day, Release uploads `.dmg`/`.exe`/`.AppImage`
+

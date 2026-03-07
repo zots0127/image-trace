@@ -1,13 +1,13 @@
 # Image Trace — Test Coverage Report
 
-Generated: 2026-03-06
+Generated: 2026-03-08
 
 ## Summary
 
 | Metric | Value |
 |:---|:---|
-| **Total Tests** | 220 |
-| **Test Files** | 7 |
+| **Total Tests** | 257 (233 backend + 24 desktop) |
+| **Test Files** | 8 |
 | **Status** | ✅ All passing |
 
 ## Test Files
