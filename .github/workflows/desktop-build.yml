@@ -66,7 +66,6 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ccache
 
-
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
@@ -173,6 +172,8 @@ jobs:
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: false
+          make_latest: true
           files: |
             artifacts/**/dist-pyinstaller/**/*.dmg
             artifacts/**/dist-pyinstaller/**/*.zip

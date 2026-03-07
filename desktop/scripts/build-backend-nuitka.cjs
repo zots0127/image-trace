@@ -84,6 +84,7 @@ const args = [
   entry,
   "--onefile",
   "--standalone",
+  "--assume-yes-for-downloads",  // Auto-download dependency walker on Windows CI
   "--follow-imports",
   `--output-dir=${toPosix(outDir)}`,
   `--output-filename=${exeName}`,
@@ -93,6 +94,10 @@ const args = [
   "--include-package=sqlmodel",
   "--include-package=uvicorn",
   "--include-package=fastapi",
+  "--include-package=skimage",
+  "--include-package=skimage.metrics",
+  "--include-package=pillow_heif",
+  "--include-package=pillow_avif",
   `--include-data-files=${toPosix(path.join(backendDir, "app", "*.py"))}=app/`,
   "--nofollow-import-to=tests",
   ...existingTxtGlobs(),
