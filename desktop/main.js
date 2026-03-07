@@ -6,6 +6,18 @@ const net = require('net');
 const http = require('http');
 const { spawn, spawnSync } = require('child_process');
 
+/** Broadcast a log line to all renderer windows */
+function sendLog(msg) {
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      win.webContents.send('backend:log', line);
+    } catch {
+      // window may be destroyed
+    }
+  }
+}
+
 function isDev() {
   return !app.isPackaged;
 }
@@ -138,32 +150,39 @@ let backendManaged = false;
 
 async function startBackendInternal() {
   if (backendProc && backendBaseUrl) {
-    // 已经启动：再确认一次健康
-    await waitForHealth(backendBaseUrl, 3000).catch(() => {});
+    sendLog('后端已在运行，检查健康...');
+    await waitForHealth(backendBaseUrl, 3000).catch(() => { });
     return { baseUrl: backendBaseUrl, port: backendPort };
   }
 
+  sendLog('初始化运行时目录...');
   await ensureRuntimeDirs();
 
   // dev 场景：如果本机已经有后端在 8000（例如你用 docker 起了），直接复用
   if (!app.isPackaged) {
     const tryUrl = 'http://127.0.0.1:8000';
+    sendLog('开发模式：检查 localhost:8000 是否有现有后端...');
     try {
       await waitForHealth(tryUrl, 800);
+      sendLog('✅ 发现已运行的后端服务（端口 8000），直接复用');
       backendProc = null;
       backendManaged = false;
       backendBaseUrl = tryUrl;
       backendPort = 8000;
       return { baseUrl: backendBaseUrl, port: backendPort };
     } catch {
-      // ignore
+      sendLog('未发现现有后端，将启动内置后端...');
     }
   }
 
+  sendLog('正在获取可用端口...');
   const port = await getFreePort(8000);
   const baseUrl = `http://127.0.0.1:${port}`;
+  sendLog(`端口已分配: ${port}`);
 
   const logStream = fs.createWriteStream(getRuntimeLogPath(), { flags: 'a' });
+  sendLog(`日志文件: ${getRuntimeLogPath()}`);
+
   const env = {
     ...process.env,
     IMAGE_TRACE_HOST: '127.0.0.1',
@@ -172,19 +191,23 @@ async function startBackendInternal() {
     IMAGE_TRACE_LOG_LEVEL: 'info',
   };
 
+  sendLog('正在查找后端可执行文件...');
   const resolvedBinary = resolveBackendBinary();
   const exePath = resolvedBinary.path;
   let child;
 
   if (!resolvedBinary.missing && fs.existsSync(exePath)) {
+    sendLog(`✅ 找到后端: ${resolvedBinary.flavor} (${path.basename(exePath)})`);
     // mac/linux: 确保可执行权限（有些打包链路会丢失 chmod）
     if (process.platform !== 'win32') {
       try {
         fs.chmodSync(exePath, 0o755);
+        sendLog('已设置可执行权限 (chmod 755)');
       } catch {
         // ignore
       }
     }
+    sendLog(`正在启动后端进程... (cwd: ${getRuntimeDir()})`);
     child = spawn(exePath, [], {
       cwd: getRuntimeDir(),
       env: {
@@ -194,8 +217,9 @@ async function startBackendInternal() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     backendManaged = true;
+    sendLog(`后端进程已启动 (PID: ${child.pid})`);
   } else if (isDev()) {
-    // 开发兜底：用 python 直接跑（构建机可用，不要求用户机器）
+    sendLog('未找到编译后端，开发模式下尝试使用 python...');
     const pyCandidates = process.platform === 'win32' ? ['python'] : ['python3', 'python'];
     let py = null;
     for (const c of pyCandidates) {
@@ -206,9 +230,12 @@ async function startBackendInternal() {
       }
     }
     if (!py) {
-      throw new Error('未找到内置后端可执行文件，且开发模式下也未检测到 python。请先运行 npm run build:backend。');
+      const msg = '未找到内置后端可执行文件，且开发模式下也未检测到 python。请先运行 npm run build:backend。';
+      sendLog(`❌ ${msg}`);
+      throw new Error(msg);
     }
 
+    sendLog(`使用 ${py} 启动开发后端...`);
     const backendDir = path.resolve(__dirname, '..', 'backend_simplified');
     child = spawn(py, ['run_server.py'], {
       cwd: backendDir,
@@ -216,16 +243,29 @@ async function startBackendInternal() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     backendManaged = true;
+    sendLog(`开发后端已启动 (PID: ${child.pid})`);
   } else {
     const tried = resolvedBinary.tried && resolvedBinary.tried.length
       ? resolvedBinary.tried.join(', ')
       : exePath;
-    throw new Error(`内置后端可执行文件不存在，已尝试：${tried}`);
+    const msg = `内置后端可执行文件不存在，已尝试：${tried}`;
+    sendLog(`❌ ${msg}`);
+    throw new Error(msg);
   }
 
-  child.stdout.on('data', (d) => logStream.write(d));
-  child.stderr.on('data', (d) => logStream.write(d));
-  child.on('exit', () => {
+  // Stream backend stdout/stderr to both log file and renderer
+  child.stdout.on('data', (d) => {
+    logStream.write(d);
+    const lines = d.toString('utf-8').split('\n').filter(Boolean);
+    for (const line of lines) sendLog(`[stdout] ${line}`);
+  });
+  child.stderr.on('data', (d) => {
+    logStream.write(d);
+    const lines = d.toString('utf-8').split('\n').filter(Boolean);
+    for (const line of lines) sendLog(`[stderr] ${line}`);
+  });
+  child.on('exit', (code, signal) => {
+    sendLog(`⚠️ 后端进程退出 (code=${code}, signal=${signal})`);
     backendProc = null;
     backendBaseUrl = null;
     backendPort = null;
@@ -235,7 +275,9 @@ async function startBackendInternal() {
   backendBaseUrl = baseUrl;
   backendPort = port;
 
+  sendLog(`正在等待后端 health check (${baseUrl}/health)...`);
   await waitForHealth(baseUrl, 20000);
+  sendLog('✅ 后端服务就绪！');
   return { baseUrl, port };
 }
 
@@ -342,5 +384,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  stopBackendInternal().catch(() => {});
+  stopBackendInternal().catch(() => { });
 });

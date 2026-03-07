@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, ReactNode, useCallback } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Terminal } from "lucide-react";
 import { checkHealth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
@@ -9,11 +9,37 @@ interface BackendGateProps {
 
 type Status = "checking" | "ready" | "error";
 
+const MAX_LOG_LINES = 200;
+
 export function BackendGate({ children }: BackendGateProps) {
   const [status, setStatus] = useState<Status>("checking");
   const [showRetry, setShowRetry] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const retryDelayRef = useRef<ReturnType<typeof setTimeout>>();
+  const logContainerRef = useRef<HTMLDivElement>(null);
+
+  // Subscribe to backend log events from Electron main process
+  useEffect(() => {
+    const desktop = (window as any).imageTraceDesktop;
+    if (desktop?.onBackendLog) {
+      const cleanup = desktop.onBackendLog((line: string) => {
+        setLogs((prev) => {
+          const next = [...prev, line];
+          return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+        });
+      });
+      return cleanup;
+    }
+  }, []);
+
+  // Auto-scroll log container
+  useEffect(() => {
+    const el = logContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [logs]);
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -37,7 +63,7 @@ export function BackendGate({ children }: BackendGateProps) {
 
   useEffect(() => {
     probe();
-    retryDelayRef.current = setTimeout(() => setShowRetry(true), 120_000); // 2 分钟后才显示“立即重试”
+    retryDelayRef.current = setTimeout(() => setShowRetry(true), 120_000);
     return () => {
       clearTimer();
       if (retryDelayRef.current) {
@@ -51,41 +77,64 @@ export function BackendGate({ children }: BackendGateProps) {
     return <>{children}</>;
   }
 
-  const isRetrying = status === "checking";
-
-  const steps = [
-    "正在启动后端服务…",
-    "正在加载图像分析模块…",
-    "正在加载后端二进制（Nuitka / PyInstaller 构建）…",
-  ];
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-4 text-center px-6">
-        <div className="relative">
-          <Loader2 className="h-12 w-12 text-primary animate-spin" />
+    <div className="min-h-screen flex items-center justify-center bg-background p-6">
+      <div className="flex flex-col items-center gap-5 w-full max-w-2xl">
+        {/* Spinner and title */}
+        <div className="flex items-center gap-3">
+          <Loader2 className="h-8 w-8 text-primary animate-spin" />
+          <h2 className="text-lg font-semibold text-foreground">
+            正在启动 Image Trace 后端服务…
+          </h2>
         </div>
-        <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-          {steps.map((msg) => (
-            <div key={msg} className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-              <span>{msg}</span>
-            </div>
-          ))}
-        </div>
-        {showRetry && (
-          <div className="flex gap-2 mt-1">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => probe()}
-              className="gap-1"
-              disabled={isRetrying}
-            >
-              <RefreshCw className="h-4 w-4" />
-              立即重试
-            </Button>
+
+        {/* Log terminal */}
+        <div className="w-full rounded-lg border border-border bg-[#0d1117] overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 bg-[#161b22] border-b border-border">
+            <Terminal className="h-4 w-4 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground font-mono">启动日志</span>
+            <span className="ml-auto text-xs text-muted-foreground font-mono">
+              {logs.length} 行
+            </span>
           </div>
+          <div
+            ref={logContainerRef}
+            className="p-3 h-72 overflow-y-auto font-mono text-xs leading-relaxed"
+          >
+            {logs.length === 0 ? (
+              <div className="text-muted-foreground/50 italic">等待日志输出…</div>
+            ) : (
+              logs.map((line, i) => (
+                <div
+                  key={i}
+                  className={`whitespace-pre-wrap break-all ${line.includes("❌") || line.includes("[stderr]")
+                      ? "text-red-400"
+                      : line.includes("✅")
+                        ? "text-green-400"
+                        : line.includes("⚠️")
+                          ? "text-yellow-400"
+                          : "text-gray-300"
+                    }`}
+                >
+                  {line}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Retry button */}
+        {showRetry && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => probe()}
+            className="gap-1"
+            disabled={status === "checking"}
+          >
+            <RefreshCw className="h-4 w-4" />
+            立即重试
+          </Button>
         )}
       </div>
     </div>

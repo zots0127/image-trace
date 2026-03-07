@@ -5,4 +5,10 @@ contextBridge.exposeInMainWorld('imageTraceDesktop', {
   stopBackend: () => ipcRenderer.invoke('backend:stop'),
   getBackendInfo: () => ipcRenderer.invoke('backend:info'),
   openDataDir: () => ipcRenderer.invoke('backend:openDataDir'),
+  onBackendLog: (callback) => {
+    const handler = (_event, line) => callback(line);
+    ipcRenderer.on('backend:log', handler);
+    // Return cleanup function
+    return () => ipcRenderer.removeListener('backend:log', handler);
+  },
 });
