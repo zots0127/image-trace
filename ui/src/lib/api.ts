@@ -448,6 +448,46 @@ export const getAnalysisResults = async (projectId: string): Promise<AnalysisRes
   return [r];
 };
 
+// ─── Smart Compare: 一键智能查重 ───────────────────────────────────
+
+export interface SmartCompareGroup {
+  images: { id: number; filename: string; file_path: string }[];
+  confidence: number;
+  matched_algorithms: string[];
+  matched_count: number;
+}
+
+export interface SmartCompareResult {
+  total_images: number;
+  algorithms_used: number;
+  found_duplicates: boolean;
+  duplicate_groups: SmartCompareGroup[];
+  unique_count: number;
+  scan_seconds: number;
+  summary: string;
+  features_pending?: boolean;
+}
+
+export const smartCompare = async (
+  projectId: string,
+  threshold = 0.85,
+): Promise<SmartCompareResult> => {
+  const fd = new FormData();
+  fd.append("threshold", String(threshold));
+  const response = await fetch(
+    `${API_BASE_URL}/smart_compare/${projectId}?threshold=${threshold}&min_agree=2`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new APIError(
+      detail?.detail || `Smart compare failed (${response.status})`,
+      response.status,
+    );
+  }
+  return response.json();
+};
+
 export const checkHealth = async (): Promise<{ status: string }> => {
   const response = await fetch(`${API_BASE_URL}/health`);
   if (!response.ok) throw new Error("Health check failed");

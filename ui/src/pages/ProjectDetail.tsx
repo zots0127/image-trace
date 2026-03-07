@@ -5,6 +5,8 @@ import {
   getProject,
   getProjectImages,
   analyzeImages,
+  smartCompare as smartCompareApi,
+  SmartCompareResult as SmartCompareResultType,
   getComparisonResults,
   visualizeMatch,
   getPairwiseMatrix,
@@ -34,7 +36,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2, Image as ImageIcon, RefreshCw, Copy, FileText } from "lucide-react";
+import { ArrowLeft, Loader2, Image as ImageIcon, RefreshCw, Copy, FileText, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { SmartCompareResultView } from "@/components/SmartCompareResult";
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -45,16 +48,18 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [images, setImages] = useState<Image[]>([]);
   const [compareResult, setCompareResult] = useState<AnalysisResult | null>(null);
+  const [smartResult, setSmartResult] = useState<SmartCompareResultType | null>(null);
   const [prefetching, setPrefetching] = useState(false);
   const [matchPair, setMatchPair] = useState<{ aId: number; bId: number; aName: string; bName: string } | null>(null);
   const [matchLoadingGroup, setMatchLoadingGroup] = useState<number | null>(null);
   const [lastAlgo, setLastAlgo] = useState<HashType>("phash");
-  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [matchAlgo, setMatchAlgo] = useState<HashType>("orb");
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [smartComparing, setSmartComparing] = useState(false);
   const [pairwiseData, setPairwiseData] = useState<PairwiseMatrixResult | null>(null);
   const [allPairwise, setAllPairwise] = useState<Record<string, PairwiseMatrixResult>>({});
   const [selectedAlgo, setSelectedAlgo] = useState<HashType>("phash");
@@ -445,195 +450,93 @@ export default function ProjectDetail() {
           </Card>
         )}
 
-        {/* Analysis */}
-        <AnalysisPanel
-          projectId={projectId!}
-          hasImages={images.length > 1}
-          onAnalyze={handleAnalyze}
-          loading={analyzing || prefetching}
-        />
-
-        {(analyzing || prefetching) && (
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            {analyzing ? t("project.analyzing") : t("project.prefetching")}
-          </div>
-        )}
-
-        {/* Compare Result */}
-        {compareResult && similarityMatrix && (
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {t("project.compareTitle", { groups: compareResult.groups.length, unique: compareResult.unique_images.length })}
-              </CardTitle>
-              <CardDescription>{t("project.compareDesc", { total: compareResult.total_images })}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground flex flex-wrap gap-4">
-                <span>{t("project.statsTotal", { count: compareResult.total_images })}</span>
-                <span>{t("project.statsGroups", { count: compareResult.groups.length })}</span>
-                <span>{t("project.statsUnique", { count: compareResult.unique_images.length })}</span>
-                <span>{t("project.statsAlgo", { algo: "All (11 algorithms)" })}</span>
-                <span className="flex items-center gap-2">
-                  {t("project.statsMatchAlgo")}
-                  <select
-                    className="border rounded px-2 py-1 text-sm bg-background"
-                    value={matchAlgo}
-                    onChange={(e) => setMatchAlgo(e.target.value as HashType)}
-                  >
-                    <option value="orb">ORB</option>
-                    <option value="brisk">BRISK</option>
-                    <option value="sift">SIFT</option>
-                    <option value="akaze">AKAZE</option>
-                    <option value="kaze">KAZE</option>
-                  </select>
-                </span>
-              </div>
-              <div className="flex justify-end">
-                <Button variant="ghost" size="sm" onClick={() => setShowAdvanced((v) => !v)}>
-                  {showAdvanced ? t("project.toggleAdvancedHide") : t("project.toggleAdvancedShow")}
+        {/* ─── Smart Compare: 一键智能查重 ─── */}
+        {images.length > 1 && (
+          <Card className="border-primary/30">
+            <CardContent className="py-6">
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold mb-1">智能查重</h3>
+                  <p className="text-sm text-muted-foreground">
+                    使用 11 种算法（含 8 方向旋转检测）自动比对所有图片，特征已在上传时预计算完成
+                  </p>
+                </div>
+                <Button
+                  size="lg"
+                  className="gap-2 px-8"
+                  disabled={smartComparing}
+                  onClick={async () => {
+                    if (!projectId) return;
+                    setSmartComparing(true);
+                    setSmartResult(null);
+                    try {
+                      const result = await smartCompareApi(projectId);
+                      setSmartResult(result);
+                      if (result.features_pending) {
+                        toast({ title: "特征计算中", description: result.summary });
+                      } else {
+                        toast({ title: "查重完成", description: result.summary });
+                      }
+                    } catch (error) {
+                      const err = error as APIError;
+                      toast({ title: "查重失败", description: err.message, variant: "destructive" });
+                    } finally {
+                      setSmartComparing(false);
+                    }
+                  }}
+                >
+                  {smartComparing ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Search className="h-5 w-5" />
+                  )}
+                  {smartComparing ? "正在比对…" : "🔍 一键智能查重"}
                 </Button>
               </div>
-              {showAdvanced && (
-                <>
-                  {/* Engine & Feature Status Badges */}
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    {pairwiseData?.engine && (
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${pairwiseData.engine === 'matrix'
-                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                        }`}>
-                        {pairwiseData.engine === 'matrix' ? '⚡' : '🔄'}
-                        {pairwiseData.engine === 'matrix' ? 'Matrix Engine' : 'Legacy Engine'}
-                      </span>
-                    )}
-                    {featureStatus && (
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${featureStatus.all_ready
-                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-orange-500/15 text-orange-400 border border-orange-500/30'
-                        }`}>
-                        {featureStatus.all_ready ? '✅' : '⏳'}
-                        {featureStatus.ready}/{featureStatus.total} Features Ready
-                      </span>
-                    )}
-                  </div>
-                  {/* Feature precomputation progress bar */}
-                  {featureStatus && !featureStatus.all_ready && featureStatus.total > 0 && (
-                    <div className="mb-3">
-                      <div className="w-full bg-white/5 rounded-full h-1.5">
-                        <div
-                          className="bg-gradient-to-r from-blue-500 to-emerald-400 h-1.5 rounded-full transition-all duration-500"
-                          style={{ width: `${(featureStatus.ready / featureStatus.total) * 100}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-white/40 mt-1">Feature matrix precomputation in progress...</p>
-                    </div>
-                  )}
-                  {/* Algorithm Tabs */}
-                  {Object.keys(allPairwise).length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-xs text-muted-foreground mb-2">Switch algorithm view:</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ALL_ALGOS.filter(a => allPairwise[a]).map((algo) => (
-                          <button
-                            key={algo}
-                            onClick={() => {
-                              setSelectedAlgo(algo);
-                              setPairwiseData(allPairwise[algo]);
-                            }}
-                            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${selectedAlgo === algo
-                                ? 'bg-primary text-primary-foreground shadow-sm'
-                                : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                              }`}
-                          >
-                            {getAlgorithmLabel(algo)}
-                            {allPairwise[algo]?.engine === 'matrix' && ' ⚡'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {pairwiseData && pairwiseData.matrix.length > 0 ? (
-                    <SimilarityMatrix matrix={pairwiseData.matrix} imageNames={pairwiseData.names} />
-                  ) : similarityMatrix ? (
-                    <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
-                  ) : null}
-                  <SimilarityGraph
-                    groups={compareResult.groups}
-                    imageIds={pairwiseData?.image_ids}
-                    matchAlgo={matchAlgo}
-                    onEdgeClick={(imgAId: number, imgBId: number) => {
-                      // Find image names
-                      const allImgs = [...compareResult.groups.flatMap(g => g.images), ...compareResult.unique_images];
-                      const aImg = allImgs.find(i => i.id === imgAId);
-                      const bImg = allImgs.find(i => i.id === imgBId);
-                      setMatchPair({
-                        aId: imgAId,
-                        bId: imgBId,
-                        aName: aImg?.filename || `#${imgAId}`,
-                        bName: bImg?.filename || `#${imgBId}`,
-                      });
-                    }}
-                  />
-                </>
-              )}
-              <div className="space-y-3">
-                {compareResult.groups.map((g) => (
-                  <div key={g.group_id} className="p-3 rounded border">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm font-medium">{t("project.groupLabel", { id: g.group_id })}</div>
-                      <Badge variant="secondary">{t("project.avgSimilarity", { percent: Math.round(g.similarity_score * 100) })}</Badge>
-                      {g.images.length >= 2 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={matchLoadingGroup === g.group_id}
-                          onClick={async () => {
-                            const [a, b] = g.images;
-                            setMatchPair({
-                              aId: a.id,
-                              bId: b.id,
-                              aName: a.filename,
-                              bName: b.filename,
-                            });
-                          }}
-                        >
-                          {matchLoadingGroup === g.group_id ? t("project.generating") : t("project.viewMatches")}
-                        </Button>
-                      )}
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {g.images.map((img) => (
-                        <div key={img.id} className="w-24 h-24 overflow-hidden rounded border">
-                          <img
-                            src={img.public_url || "/placeholder.svg"}
-                            alt={img.filename}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {compareResult.unique_images.length > 0 && (
-                  <div className="p-3 rounded border">
-                    <div className="text-sm font-medium mb-2">{t("project.ungrouped")}</div>
-                    <div className="flex gap-2 flex-wrap">
-                      {compareResult.unique_images.map((img) => (
-                        <div key={img.id} className="w-24 h-24 overflow-hidden rounded border">
-                          <img
-                            src={img.public_url || "/placeholder.svg"}
-                            alt={img.filename}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
             </CardContent>
+          </Card>
+        )}
+
+        {/* Smart Compare Results */}
+        {smartResult && <SmartCompareResultView result={smartResult} />}
+
+        {/* ─── Advanced View (collapsed) ─── */}
+        {compareResult && similarityMatrix && (
+          <Card>
+            <CardHeader className="cursor-pointer" onClick={() => setShowAdvanced((v) => !v)}>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  高级分析视图
+                  {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </CardTitle>
+                <span className="text-xs text-muted-foreground">相似度矩阵 · 网络图</span>
+              </div>
+            </CardHeader>
+            {showAdvanced && (
+              <CardContent className="space-y-4">
+                {pairwiseData && pairwiseData.matrix.length > 0 ? (
+                  <SimilarityMatrix matrix={pairwiseData.matrix} imageNames={pairwiseData.names} />
+                ) : similarityMatrix ? (
+                  <SimilarityMatrix matrix={similarityMatrix.matrix} images={similarityMatrix.images} />
+                ) : null}
+                <SimilarityGraph
+                  groups={compareResult.groups}
+                  imageIds={pairwiseData?.image_ids}
+                  matchAlgo={matchAlgo}
+                  onEdgeClick={(imgAId: number, imgBId: number) => {
+                    const allImgs = [...compareResult.groups.flatMap(g => g.images), ...compareResult.unique_images];
+                    const aImg = allImgs.find(i => i.id === imgAId);
+                    const bImg = allImgs.find(i => i.id === imgBId);
+                    setMatchPair({
+                      aId: imgAId,
+                      bId: imgBId,
+                      aName: aImg?.filename || `#${imgAId}`,
+                      bName: bImg?.filename || `#${imgBId}`,
+                    });
+                  }}
+                />
+              </CardContent>
+            )}
           </Card>
         )}
 

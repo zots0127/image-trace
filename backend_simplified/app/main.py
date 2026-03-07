@@ -401,6 +401,174 @@ async def compare_project_images(
         raise HTTPException(status_code=500, detail=f"比对失败: {str(e)}")
 
 
+# ─── Smart Compare: 一键智能查重 ───────────────────────────────────
+
+SMART_ALGOS = ['phash', 'dhash', 'ahash', 'whash', 'ssim', 'histogram',
+               'sift', 'orb', 'brisk', 'akaze', 'kaze']
+
+
+@app.post("/smart_compare/{project_id}")
+async def smart_compare(
+    project_id: int,
+    threshold: float = 0.85,
+    min_agree: int = 2,
+    session: Session = Depends(get_db),
+):
+    """
+    一键智能查重：读取全部预计算特征矩阵，交叉聚合 11 种算法结果。
+    不需要重新计算任何特征，只是矩阵查询 + numpy 运算（毫秒级）。
+    """
+    import time as _time
+    t0 = _time.time()
+
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    images = session.exec(
+        select(Image).where(Image.project_id == project_id)
+    ).all()
+
+    if len(images) < 2:
+        return {
+            "total_images": len(images),
+            "algorithms_used": len(SMART_ALGOS),
+            "found_duplicates": False,
+            "duplicate_groups": [],
+            "unique_count": len(images),
+            "scan_seconds": 0,
+            "summary": f"项目中{'只有 1 张图片' if len(images) == 1 else '没有图片'}，无法进行查重比对",
+        }
+
+    image_ids = [img.id for img in images]
+    id_to_img = {img.id: img for img in images}
+
+    # Check features ready
+    not_ready = [img for img in images if (img.feature_status or "pending") != "ready"]
+    if not_ready:
+        names = ", ".join(img.filename for img in not_ready[:5])
+        suffix = f" 等 {len(not_ready)} 张" if len(not_ready) > 5 else ""
+        return {
+            "total_images": len(images),
+            "algorithms_used": 0,
+            "found_duplicates": False,
+            "duplicate_groups": [],
+            "unique_count": len(images),
+            "scan_seconds": 0,
+            "features_pending": True,
+            "summary": f"部分图片特征尚未计算完成（{names}{suffix}），请稍后重试",
+        }
+
+    n = len(image_ids)
+    # Collect per-pair algorithm agreement: (i,j) -> list of (algo, score)
+    pair_hits: dict = {}  # (i, j) -> [(algo, score)]
+
+    for algo in SMART_ALGOS:
+        try:
+            sim = compute_similarity_matrix_fast(
+                session, image_ids, algo, rotation_invariant=True
+            )
+            for i in range(n):
+                for j in range(i + 1, n):
+                    score = float(sim[i, j])
+                    if score >= threshold:
+                        key = (i, j)
+                        if key not in pair_hits:
+                            pair_hits[key] = []
+                        pair_hits[key].append((algo, round(score, 4)))
+        except Exception:
+            continue
+
+    # Filter: only pairs where ≥ min_agree algorithms agree
+    confirmed_pairs = {k: v for k, v in pair_hits.items() if len(v) >= min_agree}
+
+    # Union-Find to group connected images
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for (i, j) in confirmed_pairs:
+        union(i, j)
+
+    # Build groups
+    from collections import defaultdict
+    groups_map = defaultdict(list)
+    for idx in range(n):
+        groups_map[find(idx)].append(idx)
+
+    duplicate_groups = []
+    grouped_indices = set()
+    for members in groups_map.values():
+        if len(members) < 2:
+            continue
+        grouped_indices.update(members)
+
+        # Collect evidence for this group
+        group_algos = set()
+        best_score = 0.0
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                key = (min(members[i], members[j]), max(members[i], members[j]))
+                if key in confirmed_pairs:
+                    for algo, score in confirmed_pairs[key]:
+                        group_algos.add(algo)
+                        best_score = max(best_score, score)
+
+        group_images = []
+        for idx in members:
+            img = id_to_img[image_ids[idx]]
+            group_images.append({
+                "id": img.id,
+                "filename": img.filename,
+                "file_path": img.file_path,
+            })
+
+        duplicate_groups.append({
+            "images": group_images,
+            "confidence": round(best_score, 4),
+            "matched_algorithms": sorted(group_algos),
+            "matched_count": len(group_algos),
+        })
+
+    # Sort by confidence desc
+    duplicate_groups.sort(key=lambda g: g["confidence"], reverse=True)
+
+    total_duplicated = len(grouped_indices)
+    unique_count = n - total_duplicated
+    elapsed = round(_time.time() - t0, 2)
+    found = len(duplicate_groups) > 0
+
+    if found:
+        summary = (
+            f"在 {n} 张图片中使用 {len(SMART_ALGOS)} 种特征进行比对，"
+            f"发现 {len(duplicate_groups)} 组共 {total_duplicated} 张疑似相似图片"
+        )
+    else:
+        summary = (
+            f"在 {n} 张图片中使用 {len(SMART_ALGOS)} 种特征进行比对，"
+            f"未发现相似图片"
+        )
+
+    return {
+        "total_images": n,
+        "algorithms_used": len(SMART_ALGOS),
+        "found_duplicates": found,
+        "duplicate_groups": duplicate_groups,
+        "unique_count": unique_count,
+        "scan_seconds": elapsed,
+        "summary": summary,
+    }
+
+
 @app.get("/results/{project_id}")
 async def get_comparison_results(
     project_id: int,
