@@ -4,7 +4,7 @@
   "description": "Cross-platform image comparison and deduplication tool",
   "author": "zots0127",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.11",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
@@ -40,13 +40,6 @@
       {
         "from": "backend_bin",
         "to": "backend_bin"
-      },
-      {
-        "from": "build/vc_redist.x64.exe",
-        "to": "vc_redist.x64.exe",
-        "filter": [
-          "vc_redist.x64.exe"
-        ]
       }
     ],
     "mac": {

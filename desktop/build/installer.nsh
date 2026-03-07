@@ -2,10 +2,8 @@
 ; This file is included by electron-builder during Windows NSIS packaging.
 
 !macro customInstall
-  ; Silently install VC++ Redistributable (required by Python/OpenCV backend)
-  ; The file is placed in build/ by CI or manually by dev
-  IfFileExists "$INSTDIR\resources\vc_redist.x64.exe" 0 +2
-    ExecWait '"$INSTDIR\resources\vc_redist.x64.exe" /install /quiet /norestart'
+  ; No custom install steps needed — VC++ Redist is handled
+  ; by the user's system or pre-installed on modern Windows 10+.
 !macroend
 
 !macro customUnInstall
