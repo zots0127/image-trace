@@ -150,6 +150,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: image-trace-desktop-${{ runner.os }}
+          retention-days: 3
           path: |
             desktop/dist-pyinstaller/**
             desktop/dist-nuitka/**
