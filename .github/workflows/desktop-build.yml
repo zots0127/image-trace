@@ -52,6 +52,9 @@ jobs:
             ~/.cache/electron-builder
             ~/Library/Caches/electron-builder
             ~\AppData\Local\electron-builder\Cache
+            ~/.ccache
+            ~/Library/Caches/ccache
+            ~\AppData\Local\ccache
           key: ${{ runner.os }}-build-cache-v2-${{ hashFiles('backend_simplified/requirements.txt', 'desktop/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-build-cache-v2-
@@ -66,6 +69,9 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ccache
 
+      - name: Windows deps (ccache)
+        if: runner.os == 'Windows'
+        run: choco install ccache --yes
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
