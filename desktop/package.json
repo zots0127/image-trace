@@ -4,7 +4,7 @@
   "description": "Cross-platform image comparison and deduplication tool",
   "author": "zots0127",
   "private": true,
-  "version": "0.1.8",
+  "version": "0.1.9",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
@@ -24,6 +24,13 @@
   "build": {
     "appId": "com.imagetrace.desktop",
     "productName": "Image Trace",
+    "asar": true,
+    "asarUnpack": [
+      "**/*.dll",
+      "**/*.so",
+      "**/*.dylib",
+      "**/*.node"
+    ],
     "files": [
       "main.js",
       "preload.js",
@@ -33,6 +40,13 @@
       {
         "from": "backend_bin",
         "to": "backend_bin"
+      },
+      {
+        "from": "build/vc_redist.x64.exe",
+        "to": "vc_redist.x64.exe",
+        "filter": [
+          "vc_redist.x64.exe"
+        ]
       }
     ],
     "mac": {
@@ -43,7 +57,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
