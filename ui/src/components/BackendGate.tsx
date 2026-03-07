@@ -1,23 +1,25 @@
 import { useEffect, useRef, useState, ReactNode, useCallback } from "react";
 import { Loader2, RefreshCw, Terminal } from "lucide-react";
-import { checkHealth } from "@/lib/api";
+import { checkHealth, setApiBaseUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 interface BackendGateProps {
   children: ReactNode;
 }
 
-type Status = "checking" | "ready" | "error";
+type Status = "starting" | "checking" | "ready" | "error";
 
 const MAX_LOG_LINES = 200;
 
 export function BackendGate({ children }: BackendGateProps) {
-  const [status, setStatus] = useState<Status>("checking");
+  const [status, setStatus] = useState<Status>("starting");
   const [showRetry, setShowRetry] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const retryDelayRef = useRef<ReturnType<typeof setTimeout>>();
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const startedRef = useRef(false);
 
   // Subscribe to backend log events from Electron main process
   useEffect(() => {
@@ -48,6 +50,7 @@ export function BackendGate({ children }: BackendGateProps) {
     }
   };
 
+  // Health check polling
   const probe = useCallback(async (delayMs = 800) => {
     clearTimer();
     setStatus("checking");
@@ -61,9 +64,42 @@ export function BackendGate({ children }: BackendGateProps) {
     }
   }, []);
 
-  useEffect(() => {
+  // Start backend via Electron IPC, then poll health
+  const startBackend = useCallback(async () => {
+    const desktop = (window as any).imageTraceDesktop;
+
+    if (desktop?.startBackend) {
+      // Running in Electron — call IPC to start backend
+      setStatus("starting");
+      try {
+        const result = await desktop.startBackend();
+        if (result.ok && result.baseUrl) {
+          // Backend started on a specific port — update API base URL
+          setApiBaseUrl(result.baseUrl);
+          setStatus("ready");
+          return;
+        } else if (result.error) {
+          setErrorMsg(result.error);
+          setStatus("error");
+          // Still try polling in case the backend starts later
+          probe();
+          return;
+        }
+      } catch (e: any) {
+        setErrorMsg(e?.message || "Failed to start backend");
+      }
+    }
+
+    // Not in Electron (browser dev mode) or IPC failed — just poll health
     probe();
-    retryDelayRef.current = setTimeout(() => setShowRetry(true), 120_000);
+  }, [probe]);
+
+  useEffect(() => {
+    if (!startedRef.current) {
+      startedRef.current = true;
+      startBackend();
+    }
+    retryDelayRef.current = setTimeout(() => setShowRetry(true), 30_000);
     return () => {
       clearTimer();
       if (retryDelayRef.current) {
@@ -71,7 +107,7 @@ export function BackendGate({ children }: BackendGateProps) {
         retryDelayRef.current = undefined;
       }
     };
-  }, [probe]);
+  }, [startBackend]);
 
   if (status === "ready") {
     return <>{children}</>;
@@ -87,6 +123,13 @@ export function BackendGate({ children }: BackendGateProps) {
             正在启动 Image Trace 后端服务…
           </h2>
         </div>
+
+        {/* Error message */}
+        {errorMsg && (
+          <div className="text-sm text-red-400 bg-red-400/10 px-4 py-2 rounded-md border border-red-400/20 max-w-lg">
+            {errorMsg}
+          </div>
+        )}
 
         {/* Log terminal */}
         <div className="w-full rounded-lg border border-border bg-[#0d1117] overflow-hidden">
@@ -128,12 +171,12 @@ export function BackendGate({ children }: BackendGateProps) {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => probe()}
+            onClick={() => startBackend()}
             className="gap-1"
-            disabled={status === "checking"}
+            disabled={status === "starting" || status === "checking"}
           >
             <RefreshCw className="h-4 w-4" />
-            立即重试
+            重新启动后端
           </Button>
         )}
       </div>

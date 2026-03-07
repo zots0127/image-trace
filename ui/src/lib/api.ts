@@ -1,6 +1,11 @@
 import { APIError } from "./errorHandler";
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+export let API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+
+/** Update the API base URL at runtime (called by BackendGate when backend starts on a dynamic port) */
+export function setApiBaseUrl(url: string) {
+  API_BASE_URL = url.replace(/\/$/, "");
+}
 
 export type HashType =
   | "orb"
