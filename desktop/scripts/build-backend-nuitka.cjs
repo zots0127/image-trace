@@ -68,6 +68,10 @@ if (typeof nuitkaCheck.status === "number" && nuitkaCheck.status !== 0) {
 
 const baseName = "image-trace-backend-nuitka";
 const exeName = process.platform === "win32" ? `${baseName}.exe` : baseName;
+// Nuitka --standalone 输出目录名为 run_server.dist，
+// 构建完后重命名为 image-trace-backend-nuitka 以保持一致
+const nuitkaDistDir = path.join(outDir, "run_server.dist");
+const finalDir = path.join(outDir, baseName);
 
 const toPosix = (p) => p.split(path.sep).join("/");
 
@@ -82,7 +86,7 @@ const args = [
   "-m",
   "nuitka",
   entry,
-  "--onefile",
+  // 不使用 --onefile，只用 --standalone（目录模式，构建更快）
   "--standalone",
   "--assume-yes-for-downloads",  // Auto-download dependency walker on Windows CI
   "--follow-imports",
@@ -105,9 +109,20 @@ const args = [
 
 run(py, args, backendDir);
 
-const builtPath = path.join(outDir, exeName);
+// Nuitka --standalone 产出 run_server.dist/ 目录，重命名为 baseName
+if (fs.existsSync(nuitkaDistDir)) {
+  // 清理旧目录
+  if (fs.existsSync(finalDir)) {
+    fs.rmSync(finalDir, { recursive: true, force: true });
+  }
+  fs.renameSync(nuitkaDistDir, finalDir);
+  console.log(`[build-backend-nuitka] renamed ${nuitkaDistDir} -> ${finalDir}`);
+}
+
+const builtPath = path.join(finalDir, exeName);
 if (!fs.existsSync(builtPath)) {
   throw new Error(`后端可执行文件未生成：${builtPath}`);
 }
 
 console.log("[build-backend-nuitka] OK:", builtPath);
+console.log("[build-backend-nuitka] 目录:", finalDir);

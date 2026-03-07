@@ -74,6 +74,7 @@ console.log('[build-backend] using', py);
 run(py, ['-m', 'PyInstaller', '--version'], backendDir);
 
 // 使用 PyInstaller 生成的后端二进制，名称明确标记编译方式
+// --onedir 模式（不用 --onefile）：产出目录 backend_bin/image-trace-backend-pyinstaller/
 const baseName = 'image-trace-backend-pyinstaller';
 const exeName = process.platform === 'win32' ? `${baseName}.exe` : baseName;
 
@@ -81,7 +82,7 @@ run(py, [
   '-m', 'PyInstaller',
   '--noconfirm',
   '--clean',
-  '--onefile',
+  // 不使用 --onefile，默认 --onedir（目录模式，构建更快，启动更快）
   '--name', baseName,
   '--distpath', outDir,
   '--workpath', workDir,
@@ -96,7 +97,7 @@ run(py, [
   '--hidden-import', 'uvicorn.protocols.http.auto',
   '--hidden-import', 'uvicorn.lifespan',
   '--hidden-import', 'uvicorn.lifespan.on',
-  '--hidden-import', 'engineio.async_drivers.asgi', // often needed for socketio/engineio if used, safe to add
+  '--hidden-import', 'engineio.async_drivers.asgi',
   '--collect-all', 'cv2',
   '--collect-all', 'fitz',
   '--collect-all', 'imagehash',
@@ -109,9 +110,11 @@ run(py, [
   entry,
 ], backendDir);
 
-const builtPath = path.join(outDir, exeName);
+// --onedir 产出：outDir/baseName/exeName
+const builtPath = path.join(outDir, baseName, exeName);
 if (!fs.existsSync(builtPath)) {
   throw new Error(`后端可执行文件未生成：${builtPath}`);
 }
 
 console.log('[build-backend] OK:', builtPath);
+console.log('[build-backend] 目录:', path.join(outDir, baseName));

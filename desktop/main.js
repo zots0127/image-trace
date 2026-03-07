@@ -45,15 +45,19 @@ function resolveBackendBinary() {
   const suffix = process.platform === 'win32' ? '.exe' : '';
   const dir = getBackendBinaryDir();
   const variants = [
-    { flavor: 'nuitka', filename: `image-trace-backend-nuitka${suffix}` },
-    { flavor: 'pyinstaller', filename: `image-trace-backend-pyinstaller${suffix}` },
-    { flavor: 'legacy', filename: `image-trace-backend${suffix}` }, // 兼容旧名称
+    // 目录模式（--onedir / --standalone）：backend_bin/<flavor>/<exe>
+    { flavor: 'nuitka', filename: `image-trace-backend-nuitka${suffix}`, subdir: 'image-trace-backend-nuitka' },
+    { flavor: 'pyinstaller', filename: `image-trace-backend-pyinstaller${suffix}`, subdir: 'image-trace-backend-pyinstaller' },
+    // 兼容旧的单文件模式（--onefile 产出直接在 backend_bin/ 下）
+    { flavor: 'nuitka-legacy', filename: `image-trace-backend-nuitka${suffix}`, subdir: null },
+    { flavor: 'pyinstaller-legacy', filename: `image-trace-backend-pyinstaller${suffix}`, subdir: null },
+    { flavor: 'legacy', filename: `image-trace-backend${suffix}`, subdir: null },
   ];
 
   const preferred = (process.env.IMAGE_TRACE_BACKEND_FLAVOR || '').toLowerCase();
   let ordered = variants;
   if (preferred) {
-    const idx = variants.findIndex((v) => v.flavor === preferred);
+    const idx = variants.findIndex((v) => v.flavor.startsWith(preferred));
     if (idx >= 0) {
       ordered = [variants[idx], ...variants.filter((_, i) => i !== idx)];
     }
@@ -61,16 +65,18 @@ function resolveBackendBinary() {
 
   const tried = [];
   for (const v of ordered) {
-    const full = path.join(dir, v.filename);
+    const full = v.subdir
+      ? path.join(dir, v.subdir, v.filename)
+      : path.join(dir, v.filename);
     tried.push(full);
     if (fs.existsSync(full)) {
-      return { path: full, flavor: v.flavor, tried, missing: false };
+      return { path: full, flavor: v.flavor.replace('-legacy', ''), tried, missing: false };
     }
   }
 
   // 未找到，返回第一个候选路径用于提示
   return {
-    path: path.join(dir, ordered[0].filename),
+    path: path.join(dir, ordered[0].subdir || '', ordered[0].filename),
     flavor: ordered[0].flavor,
     tried,
     missing: true,
